@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo"
 GEMINI_API_KEY = "AIzaSyCmjsjhm5m8N51ec3Mjl13VEFwMj8C9cGc"
 MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21"
-ALLOWED_GROUP = "@McGapGroup"
+ALLOWED_GROUP_ID = -1001982004212  # Replace with your group's chat_id
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -27,24 +27,23 @@ conversation_history = {}
 # Create a custom filter class that checks both message format and group
 class RcmFilter(filters.MessageFilter):
     def filter(self, message):
-        # Check if the message is from the allowed group
-        if not message.chat.username or message.chat.username != "McGapGroup":
+        # Only allow messages from the specific group
+        if message.chat.id != ALLOWED_GROUP_ID:
             return False
-        # Check if it's an /rcm message
         return message.text and message.text.startswith('/rcm ')
 
 rcm_filter = RcmFilter()
 
 async def start(update: Update, context: CallbackContext) -> None:
     """Sends a welcome message on the /start command."""
-    # Check if the command is from the allowed group
-    if not update.message.chat.username or update.message.chat.username != "McGapGroup":
+    # Only respond in the allowed group
+    if update.message.chat.id != ALLOWED_GROUP_ID:
         return
         
     await update.message.reply_text(
-        "Hi! I'm a chatbot powered by Gemini Flash 2. Use '/rcm <your message>' to chat with me!"
+        "Hi! I'm a chatbot powered by Gemini Flash 2. Use '/rcm <your message>' to chat with me! I only work in this group."
     )
-    conversation_history[update.message.chat_id] = []
+    conversation_history[update.message.chat.id] = []
 
 async def gemini_response(user_message, chat_id):
     """Gets a response from the Gemini model."""
@@ -71,11 +70,11 @@ async def gemini_response(user_message, chat_id):
 
 async def handle_rcm(update: Update, context: CallbackContext) -> None:
     """Handles /rcm messages"""
-    # Double-check if the message is from the allowed group
-    if not update.message.chat.username or update.message.chat.username != "McGapGroup":
+    # Only process messages from the allowed group
+    if update.message.chat.id != ALLOWED_GROUP_ID:
         return
         
-    chat_id = update.message.chat_id
+    chat_id = update.message.chat.id
     message_text = update.message.text[5:].strip()  # Remove "/rcm " prefix
     
     if not message_text:
