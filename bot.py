@@ -99,7 +99,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     user_message = update.message.text
     chat_id = update.message.chat_id
 
-    # Check if the message starts with "/rcm "
+    # Only respond if the message starts with "/rcm "
     if user_message.startswith("/rcm "):
         prompt = user_message[5:]  # Remove "/rcm " from the message
         logger.info(f"User {chat_id} says: {prompt}")
@@ -107,8 +107,9 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         gemini_text = await gemini_response(prompt)
 
         await update.message.reply_text(gemini_text)
+    # Do nothing if the message doesn't start with "/rcm"
     else:
-        await update.message.reply_text("Please send a prompt in the format: /rcm <your prompt>")
+        pass  # No action taken
 
 
 def main() -> None:
