@@ -1,13 +1,13 @@
 {
-  "name": "telegram-gemini-bot",
+  "name": "telegram-bot",
   "version": "1.0.0",
-  "description": "A Telegram bot powered by Gemini AI using node-telegram-bot-api.",
+  "description": "A simple Telegram bot using node-telegram-bot-api and axios.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.5.0",
+    "axios": "^1.6.0",
     "node-telegram-bot-api": "^0.61.0"
   },
   "engines": {
