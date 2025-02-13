@@ -1,24 +1,24 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Directly defined tokens (replace with your actual keys)
-const BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo"; // Replace with your bot token
-const GEMINI_API_KEY = "AIzaSyDVvkJHT9HRKnSo4ZYN8GNV3kt5tn-kwcc"; // Replace with your Gemini API key
-const MODEL_NAME = "gemini-1.5-flash-002"; // Or another suitable model
+// Replace with your actual keys
+const BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo";
+const GEMINI_API_KEY = "AIzaSyDVvkJHT9HRKnSo4ZYN8GNV3kt5tn-kwcc";
+const MODEL_NAME = "gemini-1.5-flash-002";
 
 // Initialize bot and Gemini
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
-// Store conversation history.  Use a Map for better key handling
-const conversationHistory = new Map();
+// Store conversation history
+const conversationHistory = {};
 
 // Handle /start command
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, "Hi! I'm a chatbot powered by Gemini Flash 2. Ask me anything or use /rcm <prompt>.");
-    conversationHistory.set(chatId, []); // Use set for Map
+    conversationHistory[chatId] = [];
 });
 
 // Handle /rcm command
@@ -42,8 +42,6 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userMessage = msg.text;
 
-    if (!userMessage) return; // Handle messages without text (e.g., images)
-
     // Ignore commands other than /rcm
     if (userMessage.startsWith('/')) return;
 
@@ -55,28 +53,33 @@ bot.on('message', async (msg) => {
 
 // Function to get Gemini response
 async function getGeminiResponse(userMessage, chatId) {
-    // Get history from Map, or create a new array if none exists
-    let history = conversationHistory.get(chatId) || [];
+    if (!conversationHistory[chatId]) {
+        conversationHistory[chatId] = [];
+    }
 
     try {
-        const chat = model.startChat({
-            history: history
+        // Start chat with history
+        const chatSession = model.startChat({
+            history: conversationHistory[chatId],
         });
 
-        const response = await chat.sendMessage(userMessage);
+        const response = await chatSession.sendMessage(userMessage);
 
-        if (response.promptFeedback?.blockReason) {
-            return `Gemini blocked this response. Reason: ${response.promptFeedback.blockReason}`;
+        if (response.response?.candidates?.[0]?.content) {
+            const geminiText = response.response.candidates[0].content.parts[0].text;
+
+            // Save conversation history (limit to last 10 exchanges)
+            conversationHistory[chatId].push({ role: "user", parts: [{ text: userMessage }] });
+            conversationHistory[chatId].push({ role: "model", parts: [{ text: geminiText }] });
+
+            if (conversationHistory[chatId].length > 20) {
+                conversationHistory[chatId] = conversationHistory[chatId].slice(-20);
+            }
+
+            return geminiText;
         }
 
-        const geminiText = response.text;
-
-        // Update conversation history in the Map
-        history.push({ role: "user", parts: [userMessage] });
-        history.push({ role: "model", parts: [geminiText] });
-        conversationHistory.set(chatId, history); // Important: Update the Map!
-
-        return geminiText;
+        return "I couldn't generate a response, please try again.";
     } catch (error) {
         console.error("Gemini API Error:", error);
         return "Error: Unable to process your request.";
