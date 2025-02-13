@@ -14,22 +14,23 @@ bot.onText(/\/rcm (.+)/, async (msg, match) => {
     if (!chatHistory[chatId]) {
         chatHistory[chatId] = [];
     }
-    chatHistory[chatId].push({ role: "user", content: prompt });
 
 
     try {
         bot.sendMessage(chatId, 'Thinking...');
 
         const messages = [{"role": "system", "content": "You are a helpful and friendly chatbot."}];
-        messages.push(...chatHistory[chatId]);
+        //  Build messages array for context
+        chatHistory[chatId].forEach(message => {
+            messages.push(message)
+        });
 
-
-        const response = await axios.post('https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText', { // Gemini API endpoint
+        const response = await axios.post('https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText', {
             prompt: {
-                text: prompt // Send the current prompt directly (Gemini doesn't use the same message structure as OpenAI)
+                messages: messages // Gemini uses the "messages" field within the prompt
             },
-            temperature: 0.7, // Adjust temperature as needed
-            top_k: 40,        // Adjust top_k as needed
+            temperature: 0.7, 
+            top_k: 40,        
             max_output_tokens: 150,
         }, {
             headers: {
@@ -38,11 +39,15 @@ bot.onText(/\/rcm (.+)/, async (msg, match) => {
             },
         });
 
-
-
-        const reply = response.data.candidates[0].output; // Extract the reply from Gemini's response
-        chatHistory[chatId].push({ role: "assistant", content: reply });
-        bot.sendMessage(chatId, reply);
+        if (response.data && response.data.candidates && response.data.candidates[0] && response.data.candidates[0].output) {  // Check if the response is in the expected format
+            const reply = response.data.candidates[0].output;
+            chatHistory[chatId].push({ role: "user", content: prompt }); // Store user message *after* getting a successful response
+            chatHistory[chatId].push({ role: "assistant", content: reply });
+            bot.sendMessage(chatId, reply);
+        } else {
+            console.error("Unexpected response format:", response.data);
+            bot.sendMessage(chatId, 'An error occurred. Unexpected response format.');
+        }
 
 
 
@@ -54,6 +59,5 @@ bot.onText(/\/rcm (.+)/, async (msg, match) => {
 
 
 // ... (rest of the code: /history, /clear_history commands remain the same)
-
 
 console.log('Bot started.');
