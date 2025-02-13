@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo"
 GEMINI_API_KEY = "AIzaSyCmjsjhm5m8N51ec3Mjl13VEFwMj8C9cGc"
-MODEL_NAME = "gemini-nano-2"
+MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21"
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
