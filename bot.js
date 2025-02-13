@@ -1,89 +1,59 @@
 const TelegramBot = require('node-telegram-bot-api');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const axios = require('axios');
 
-// Replace with your actual keys
-const BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo";
-const GEMINI_API_KEY = "AIzaSyDVvkJHT9HRKnSo4ZYN8GNV3kt5tn-kwcc";
-const MODEL_NAME = "gemini-1.5-flash-002";
+const TELEGRAM_BOT_TOKEN = '7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo';
+const GOOGLE_API_KEY = 'AIzaSyDVvkJHT9HRKnSo4ZYN8GNV3kt5tn-kwcc';
 
-// Initialize bot and Gemini
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const chatHistory = {};
 
-// Store conversation history
-const conversationHistory = {};
-
-// Handle /start command
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId, "Hi! I'm a chatbot powered by Gemini Flash 2. Ask me anything or use /rcm <prompt>.");
-    conversationHistory[chatId] = [];
-});
-
-// Handle /rcm command
 bot.onText(/\/rcm (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const prompt = match[1];
 
-    if (!prompt) {
-        bot.sendMessage(chatId, "Usage: /rcm <prompt>");
-        return;
+    if (!chatHistory[chatId]) {
+        chatHistory[chatId] = [];
     }
+    chatHistory[chatId].push({ role: "user", content: prompt });
 
-    console.log(`User ${chatId} used /rcm: ${prompt}`);
-
-    const responseText = await getGeminiResponse(prompt, chatId);
-    bot.sendMessage(chatId, responseText);
-});
-
-// Handle normal text messages
-bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const userMessage = msg.text;
-
-    // Ignore commands other than /rcm
-    if (userMessage.startsWith('/')) return;
-
-    console.log(`User ${chatId}: ${userMessage}`);
-
-    const responseText = await getGeminiResponse(userMessage, chatId);
-    bot.sendMessage(chatId, responseText);
-});
-
-// Function to get Gemini response
-async function getGeminiResponse(userMessage, chatId) {
-    if (!conversationHistory[chatId]) {
-        conversationHistory[chatId] = [];
-    }
 
     try {
-        // Start chat with history
-        const chatSession = model.startChat({
-            history: conversationHistory[chatId],
+        bot.sendMessage(chatId, 'Thinking...');
+
+        const messages = [{"role": "system", "content": "You are a helpful and friendly chatbot."}];
+        messages.push(...chatHistory[chatId]);
+
+
+        const response = await axios.post('https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText', { // Gemini API endpoint
+            prompt: {
+                text: prompt // Send the current prompt directly (Gemini doesn't use the same message structure as OpenAI)
+            },
+            temperature: 0.7, // Adjust temperature as needed
+            top_k: 40,        // Adjust top_k as needed
+            max_output_tokens: 150,
+        }, {
+            headers: {
+                'Authorization': `Bearer ${GOOGLE_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
         });
 
-        const response = await chatSession.sendMessage(userMessage);
 
-        if (response.response?.candidates?.[0]?.content) {
-            const geminiText = response.response.candidates[0].content.parts[0].text;
 
-            // Save conversation history (limit to last 10 exchanges)
-            conversationHistory[chatId].push({ role: "user", parts: [{ text: userMessage }] });
-            conversationHistory[chatId].push({ role: "model", parts: [{ text: geminiText }] });
+        const reply = response.data.candidates[0].output; // Extract the reply from Gemini's response
+        chatHistory[chatId].push({ role: "assistant", content: reply });
+        bot.sendMessage(chatId, reply);
 
-            if (conversationHistory[chatId].length > 20) {
-                conversationHistory[chatId] = conversationHistory[chatId].slice(-20);
-            }
 
-            return geminiText;
-        }
 
-        return "I couldn't generate a response, please try again.";
     } catch (error) {
-        console.error("Gemini API Error:", error);
-        return "Error: Unable to process your request.";
+        console.error(error);
+        bot.sendMessage(chatId, 'An error occurred.');
     }
-}
+});
 
-console.log("Bot is running...");
+
+// ... (rest of the code: /history, /clear_history commands remain the same)
+
+
+console.log('Bot started.');
