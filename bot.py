@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo"
 GEMINI_API_KEY = "AIzaSyCmjsjhm5m8N51ec3Mjl13VEFwMj8C9cGc"
 MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21"
-ALLOWED_GROUP_ID = 1002307718681  # Replace with your group's chat_id
+ALLOWED_GROUP_ID =-1002307718681# Replace with your group's chat_id
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
