@@ -143,74 +143,81 @@ def handle_callback(query):
     """Handle button clicks for likes & downloads"""
     chat_id = query["message"]["chat"]["id"]
     message_id = query["message"]["message_id"]
+    callback_id = query["id"]
     data = query["data"]
 
+    # First acknowledge the callback to prevent timeout
+    send_request("answerCallbackQuery", {"callback_query_id": callback_id})
+
     if data.startswith("like_"):
-        link_id = data.split("like_")[1]
-        file_data = get_file_data(link_id)
+        link_id = data.split("_")[1]
+        file_data = files_collection.find_one({"link_id": link_id})
 
         if file_data:
             new_likes = file_data["likes"] + 1
-            file_data["likes"] = new_likes
+            files_collection.update_one({"link_id": link_id}, {"$set": {"likes": new_likes}})
             
-            files_collection.update_one(
-                {"link_id": link_id}, 
-                {"$set": {"likes": new_likes}}
-            )
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
+                    [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
+                ]
+            }
             
             send_request("editMessageReplyMarkup", {
                 "chat_id": chat_id,
                 "message_id": message_id,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
-                        [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
-                    ]
-                }
+                "reply_markup": keyboard
             })
 
     elif data.startswith("download_"):
-        link_id = data.split("download_")[1]
-        file_data = get_file_data(link_id)
+        link_id = data.split("_")[1]
+        file_data = files_collection.find_one({"link_id": link_id})
 
         if file_data:
-            new_text = f"📥 {file_data['downloads']} دریافت"
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
+                    [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
+                ]
+            }
+            
             send_request("editMessageReplyMarkup", {
                 "chat_id": chat_id,
                 "message_id": message_id,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
-                        [{"text": new_text, "callback_data": f"download_{link_id}"}]
-                    ]
-                }
+                "reply_markup": keyboard
             })
 
 def handle_updates(updates):
     """Process multiple updates efficiently"""
     for update in updates:
-        if "message" in update:
-            msg = update["message"]
-            chat_id = msg["chat"]["id"]
-            username = msg["from"].get("username", "")
+        try:
+            if "message" in update:
+                msg = update["message"]
+                chat_id = msg["chat"]["id"]
+                username = msg["from"].get("username", "")
 
-            if "text" in msg:
-                text = msg["text"]
-                
-                if text == "پنل" and username in WHITELIST:
-                    send_panel(chat_id)
+                if "text" in msg:
+                    text = msg["text"]
+                    
+                    if text == "پنل" and username in WHITELIST:
+                        send_panel(chat_id)
 
-                elif text.startswith("/start "):
-                    link_id = text.split("/start ")[1]
-                    send_stored_file(chat_id, link_id)
+                    elif text.startswith("/start "):
+                        parts = text.split()
+                        if len(parts) > 1:
+                            link_id = parts[1]
+                            send_stored_file(chat_id, link_id)
 
-            elif "document" in msg:
-                file_id = msg["document"]["file_id"]
-                file_name = msg["document"].get("file_name", "unnamed_file")
-                handle_file_upload(chat_id, file_id, file_name)
-        
-        elif "callback_query" in update:
-            handle_callback(update["callback_query"])
+                elif "document" in msg:
+                    file_id = msg["document"]["file_id"]
+                    file_name = msg["document"].get("file_name", "unnamed_file")
+                    handle_file_upload(chat_id, file_id, file_name)
+            
+            elif "callback_query" in update:
+                handle_callback(update["callback_query"])
+        except Exception as e:
+            logger.error(f"Error handling update: {e}")
 
 # Polling mechanism
 def start_bot():
