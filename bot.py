@@ -171,7 +171,20 @@ def handle_callback(query):
 
     elif data.startswith("download_"):
         link_id = data.split("download_")[1]
-        send_stored_file(chat_id, link_id)
+        file_data = get_file_data(link_id)
+
+        if file_data:
+            new_text = f"📥 {file_data['downloads']} دریافت"
+            send_request("editMessageReplyMarkup", {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
+                        [{"text": new_text, "callback_data": f"download_{link_id}"}]
+                    ]
+                }
+            })
 
 def handle_updates(updates):
     """Process multiple updates efficiently"""
