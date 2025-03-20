@@ -7,7 +7,7 @@ from pymongo import MongoClient
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Configurations
@@ -35,26 +35,35 @@ def send_request(method, data):
     """Send requests to Telegram API with session reuse"""
     url = API_URL + method
     try:
-        return session.post(url, json=data, timeout=10).json()
+        response = session.post(url, json=data, timeout=10)
+        return response.json()
     except Exception as e:
         logger.error(f"API request error: {e}")
         return {"ok": False, "error": str(e)}
 
 def generate_link():
     """Generate a random link ID"""
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    return "".join(random.choices(string.ascii_letters + string.digits, k=8))
 
 def get_persian_time():
     """Get Persian time"""
     now = datetime.now()
     return now.strftime("%Y/%m/%d - %H:%M")
 
+def escape_markdown(text):
+    """Escape Markdown for Telegram compatibility"""
+    escape_chars = "_*[]()~`>#+-=|{}.!<>"
+    return "".join(f"\\{char}" if char in escape_chars else char for char in text)
+
 def send_panel(chat_id):
     """Send Persian panel with date/time"""
-    text = f"🌟 *خوش آمدید!* 🌟\n\n📆 تاریخ: `{get_persian_time()}`\n📂 برای آپلود فایل، دکمه زیر را فشار دهید."
+    text = f"🌟 *خوش آمدید\!* 🌟\n\n📆 تاریخ: `{get_persian_time()}`\n📂 برای آپلود فایل، دکمه زیر را فشار دهید."
     keyboard = {"inline_keyboard": [[{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]]}
     send_request("sendMessage", {
-        "chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "MarkdownV2",
+        "reply_markup": keyboard
     })
 
 def handle_file_upload(chat_id, file_id, file_name):
@@ -73,19 +82,19 @@ def handle_file_upload(chat_id, file_id, file_name):
     link_cache[link_id] = {"file_id": file_id, "likes": 0, "downloads": 0}
 
     start_link = f"/start {link_id}"
-    text = f"✅ فایل شما ذخیره شد!\n🔗 لینک دریافت:\n```\n{start_link}\n```"
+    text = f"✅ فایل شما ذخیره شد\!\n🔗 لینک دریافت:\n`{escape_markdown(start_link)}`"
     
     keyboard = {
         "inline_keyboard": [
-            [{"text": f"❤️ 0", "callback_data": f"like_{link_id}"}],
-            [{"text": f"📥 0 دریافت", "callback_data": f"download_{link_id}"}]
+            [{"text": "❤️ 0", "callback_data": f"like_{link_id}"}],
+            [{"text": "📥 0 دریافت", "callback_data": f"download_{link_id}"}]
         ]
     }
 
     send_request("sendMessage", {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "MarkdownV2",
         "reply_markup": keyboard
     })
 
@@ -120,7 +129,6 @@ def send_stored_file(chat_id, link_id):
             {"$set": {"downloads": new_download_count}}
         )
 
-        # Send file with updated buttons
         keyboard = {
             "inline_keyboard": [
                 [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
@@ -138,55 +146,6 @@ def send_stored_file(chat_id, link_id):
             "chat_id": chat_id,
             "text": "❌ لینک نامعتبر است یا فایل حذف شده است."
         })
-
-def handle_callback(query):
-    """Handle button clicks for likes & downloads"""
-    chat_id = query["message"]["chat"]["id"]
-    message_id = query["message"]["message_id"]
-    callback_id = query["id"]
-    data = query["data"]
-
-    # First acknowledge the callback to prevent timeout
-    send_request("answerCallbackQuery", {"callback_query_id": callback_id})
-
-    if data.startswith("like_"):
-        link_id = data.split("_")[1]
-        file_data = files_collection.find_one({"link_id": link_id})
-
-        if file_data:
-            new_likes = file_data["likes"] + 1
-            files_collection.update_one({"link_id": link_id}, {"$set": {"likes": new_likes}})
-            
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
-                    [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
-                ]
-            }
-            
-            send_request("editMessageReplyMarkup", {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "reply_markup": keyboard
-            })
-
-    elif data.startswith("download_"):
-        link_id = data.split("_")[1]
-        file_data = files_collection.find_one({"link_id": link_id})
-
-        if file_data:
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
-                    [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
-                ]
-            }
-            
-            send_request("editMessageReplyMarkup", {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "reply_markup": keyboard
-            })
 
 def handle_updates(updates):
     """Process multiple updates efficiently"""
@@ -235,7 +194,7 @@ def start_bot():
                 handle_updates(updates["result"])
                 offset = updates["result"][-1]["update_id"] + 1
             
-            # Clear old cache entries periodically
+            # Periodic cache cleanup
             if len(link_cache) > 1000:  # Arbitrary limit
                 link_cache.clear()
                 
