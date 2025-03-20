@@ -5,7 +5,6 @@ import time
 from datetime import datetime
 from pymongo import MongoClient
 import logging
-import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -54,17 +53,13 @@ def send_panel(chat_id):
     """Send Persian panel with date/time"""
     text = f"🌟 *خوش آمدید!* 🌟\n\n📆 تاریخ: `{get_persian_time()}`\n📂 برای آپلود فایل، دکمه زیر را فشار دهید."
     
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]
-        ]
-    }
+    keyboard = {"inline_keyboard": [[{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]]}
 
     send_request("sendMessage", {
         "chat_id": chat_id, 
         "text": text, 
         "parse_mode": "Markdown", 
-        "reply_markup": json.dumps(keyboard)
+        "reply_markup": keyboard
     })
 
 def handle_file_upload(chat_id, file_id, file_name):
@@ -167,22 +162,44 @@ def handle_callback(query):
             new_likes = file_data["likes"] + 1
             files_collection.update_one({"link_id": link_id}, {"$set": {"likes": new_likes}})
             
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
-                    [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
-                ]
-            }
-            
+            # Update the button text and maintain the same structure
             send_request("editMessageReplyMarkup", {
                 "chat_id": chat_id,
                 "message_id": message_id,
-                "reply_markup": keyboard
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
+                        [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
+                    ]
+                }
             })
     
     elif data.startswith("download_"):
         link_id = data.split("_")[1]
-        send_stored_file(chat_id, link_id)
+        file_data = files_collection.find_one({"link_id": link_id})
+        
+        if file_data:
+            # Just update the UI without changing download count yet
+            # The actual download will happen when send_stored_file is called
+            send_request("editMessageReplyMarkup", {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
+                        [{"text": f"📥 {file_data['downloads']} دریافت", "callback_data": f"download_{link_id}"}]
+                    ]
+                }
+            })
+            
+            # Send the file in a new message
+            send_stored_file(chat_id, link_id)
+    
+    elif data == "upload_file":
+        send_request("sendMessage", {
+            "chat_id": chat_id,
+            "text": "📤 لطفاً فایل خود را برای آپلود ارسال کنید."
+        })
 
 def handle_updates(updates):
     """Process multiple updates efficiently"""
@@ -223,6 +240,7 @@ def start_bot():
         if "result" in updates and updates["result"]:
             handle_updates(updates["result"])
             offset = updates["result"][-1]["update_id"] + 1
+        time.sleep(1)  # Small delay to prevent excessive API calls
 
 if __name__ == "__main__":
     logger.info("Bot started")
