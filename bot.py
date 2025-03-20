@@ -64,7 +64,7 @@ def send_panel(chat_id):
         "chat_id": chat_id, 
         "text": text, 
         "parse_mode": "Markdown", 
-        "reply_markup": keyboard
+        "reply_markup": json.dumps(keyboard)
     })
 
 def handle_file_upload(chat_id, file_id, file_name):
