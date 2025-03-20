@@ -3,7 +3,6 @@ import time
 import threading
 import json
 import datetime
-import os
 from pymongo import MongoClient
 
 # Bot Configuration
@@ -19,13 +18,6 @@ audio_collection = db['audio_files']
 # Whitelisted users (usernames without @)
 WHITELISTED_USERS = ["zonercm"]  # Add your usernames here
 
-# File paths for automation
-CROSS_FILE_PATH = '/storage/emulated/0/scripts/cross_audio.m4a'  # Update with your file path
-MADE_FILE_PATH = '/storage/emulated/0/scripts/Made.mp3'    # Update with your file path
-
-# Scheduled tasks dictionary
-scheduled_tasks = {}
-
 # Persian numeral conversion
 def to_persian_numerals(text):
     """Convert English numbers to Persian numbers"""
@@ -35,16 +27,6 @@ def to_persian_numerals(text):
     }
     for en, fa in persian_nums.items():
         text = text.replace(en, fa)
-    return text
-
-def from_persian_numerals(text):
-    """Convert Persian numbers to English numbers"""
-    persian_nums = {
-        '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-        '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
-    }
-    for fa, en in persian_nums.items():
-        text = text.replace(fa, en)
     return text
 
 def get_persian_time():
@@ -113,24 +95,6 @@ def send_audio(chat_id, file_path, caption=None):
     response = requests.post(url, data=payload, files=files)
     return response.json()
 
-def schedule_audio_send(chat_id, minutes, file_path, task_id):
-    """Schedule audio file to be sent after specified minutes"""
-    def send_scheduled_audio():
-        send_audio(chat_id, file_path, caption="✅ فایل برنامه‌ریزی شده شما")
-        if task_id in scheduled_tasks:
-            del scheduled_tasks[task_id]
-    
-    # Convert minutes to seconds
-    seconds = int(minutes) * 60
-    timer = threading.Timer(seconds, send_scheduled_audio)
-    timer.daemon = True
-    timer.start()
-    
-    # Store the timer so it can be cancelled if needed
-    scheduled_tasks[task_id] = timer
-    
-    return timer
-
 def create_inline_keyboard():
     """Create inline keyboard with two buttons"""
     keyboard = {
@@ -142,13 +106,12 @@ def create_inline_keyboard():
     }
     return json.dumps(keyboard)
 
+# Dictionary to store state of which chat is waiting for audio
+waiting_for_audio = {}
+
 def main():
     print("🤖 ربات فارسی در حال اجرا شدن است...")
     offset = None
-    
-    # State variables
-    waiting_for_time = {}  # chat_id: callback_type
-    waiting_for_audio = {}  # chat_id: audio_file_name
     
     while True:
         try:
