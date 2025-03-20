@@ -1,181 +1,226 @@
 import requests
 import time
-import threading
 import json
-import datetime
-from pymongo import MongoClient
+import os
+from datetime import datetime
+import pymongo
+from bson.objectid import ObjectId
 
-# Bot Configuration
-API_TOKEN = "1547814800:qz5gVdxqxhExyUwPmlUM3cK8q6E9yVdgdyuUZJDA"
-BASE_URL = 'https://tapi.bale.ai/bot{TOKEN}'
+# Bot configuration
+TOKEN = "7435111550:AAGggKVIoyYQI-UQmpqIyB31VEM6f2sINeY"
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
+WHITELISTED_USERS = ["zonercm", "user2", "user3"]  # Replace with actual usernames
 
-# MongoDB Connection
-MONGO_URI = "mongodb://mongo:LdQvOFTnDVjPCDGqCzHNSsPUyqUZBkPq@tramway.proxy.rlwy.net:27166"
-client = MongoClient(MONGO_URI)
-db = client['bale_bot']
-audio_collection = db['audio_files']
+# MongoDB setup
+client = pymongo.MongoClient("mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220")
+db = client["audio_bot_db"]
+audio_collection = db["audio_files"]
 
-# Whitelisted users (usernames without @)
-WHITELISTED_USERS = ["zonercm"]  # Add your usernames here
+# Create audio directory
+os.makedirs("audio_files", exist_ok=True)
 
-# Persian numeral conversion
-def to_persian_numerals(text):
-    """Convert English numbers to Persian numbers"""
-    persian_nums = {
-        '0': '۰', '1': '۱', '2': '۲', '3': '۳', '4': '۴',
-        '5': '۵', '6': '۶', '7': '۷', '8': '۸', '9': '۹'
-    }
-    for en, fa in persian_nums.items():
-        text = text.replace(en, fa)
-    return text
+# User states
+user_states = {}
+last_update_id = 0
 
+# Persian numbers
+def to_persian_num(num):
+    persian_nums = '۰۱۲۳۴۵۶۷۸۹'
+    return ''.join(persian_nums[int(d)] for d in str(num))
+
+# Get current Persian time
 def get_persian_time():
-    """Returns current time in Persian format"""
-    now = datetime.datetime.now()
-    weekday_map = {
-        0: "دوشنبه",     # Monday
-        1: "سه‌شنبه",    # Tuesday
-        2: "چهارشنبه",   # Wednesday
-        3: "پنج‌شنبه",   # Thursday
-        4: "جمعه",       # Friday
-        5: "شنبه",       # Saturday
-        6: "یک‌شنبه"     # Sunday
-    }
-    
-    weekday = weekday_map[now.weekday()]
-    date_str = f"{now.year}/{now.month}/{now.day}"
-    time_str = f"{now.hour}:{now.minute}:{now.second}"
-    
-    return f"🗓 {weekday} {to_persian_numerals(date_str)}\n⏰ ساعت {to_persian_numerals(time_str)}"
+    now = datetime.now()
+    return f"{to_persian_num(now.hour)}:{to_persian_num(now.minute)}"
 
-def get_updates(offset=None):
-    """Get updates from Telegram API"""
-    url = f'{BASE_URL}/getUpdates'
-    params = {'timeout': 30, 'allowed_updates': ['message', 'callback_query']}
-    if offset:
-        params['offset'] = offset
-    response = requests.get(url, params=params)
-    return response.json()
+# Fast API request function
+def send_request(method, data=None):
+    url = f"{API_URL}/{method}"
+    try:
+        if data:
+            response = requests.post(url, data=data, timeout=5)
+        else:
+            response = requests.get(url, timeout=5)
+        return response.json()
+    except Exception as e:
+        print(f"Error in {method}: {e}")
+        return {"ok": False}
 
-def send_message(chat_id, text, reply_markup=None):
-    """Send message to Telegram chat"""
-    url = f'{BASE_URL}/sendMessage'
-    payload = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'HTML',
-    }
-    if reply_markup:
-        payload['reply_markup'] = reply_markup
-    response = requests.post(url, json=payload)
-    return response.json()
-
-def edit_message(chat_id, message_id, text, reply_markup=None):
-    """Edit existing message"""
-    url = f'{BASE_URL}/editMessageText'
-    payload = {
-        'chat_id': chat_id,
-        'message_id': message_id,
-        'text': text,
-        'parse_mode': 'HTML'
-    }
-    if reply_markup:
-        payload['reply_markup'] = reply_markup
-    response = requests.post(url, json=payload)
-    return response.json()
-
-def send_audio(chat_id, file_path, caption=None):
-    """Send audio file to chat"""
-    url = f'{BASE_URL}/sendAudio'
-    payload = {'chat_id': chat_id}
-    if caption:
-        payload['caption'] = caption
-    
-    files = {'audio': open(file_path, 'rb')}
-    response = requests.post(url, data=payload, files=files)
-    return response.json()
-
-def create_inline_keyboard():
-    """Create inline keyboard with two buttons"""
-    keyboard = {
-        'inline_keyboard': [
-            [
-                {'text': 'ارسال فایل صوتی', 'callback_data': 'send_audio'}
-            ]
-        ]
-    }
-    return json.dumps(keyboard)
-
-# Dictionary to store state of which chat is waiting for audio
-waiting_for_audio = {}
-
-def main():
-    print("🤖 ربات فارسی در حال اجرا شدن است...")
-    offset = None
+# Main bot loop
+def run_bot():
+    global last_update_id
+    print("Bot started!")
     
     while True:
-        try:
-            updates = get_updates(offset)
-            if 'result' in updates and updates['result']:
-                for update in updates['result']:
-                    offset = update['update_id'] + 1
-                    
-                    # Handle messages
-                    if 'message' in update and 'text' in update['message']:
-                        message = update['message']
-                        chat_id = message['chat']['id']
-                        text = message['text']
-                        user = message.get('from', {}).get('username', '')
-                        
-                        # Check for panel command
-                        if text == "پنل" and user in WHITELISTED_USERS:
-                            # Send greeting with Persian time
-                            greeting = f"🌟 سلام {message.get('from', {}).get('first_name', 'کاربر گرامی')} عزیز!\n\n{get_persian_time()}\n\n⚙️ پنل مدیریت فایل ها:"
-                            keyboard = create_inline_keyboard()
-                            send_message(chat_id, greeting, keyboard)
-                    
-                    # Handle callback queries (inline keyboard button clicks)
-                    if 'callback_query' in update:
-                        callback = update['callback_query']
-                        chat_id = callback['message']['chat']['id']
-                        message_id = callback['message']['message_id']
-                        callback_data = callback['data']
-                        user = callback.get('from', {}).get('username', '')
-                        
-                        if user in WHITELISTED_USERS:
-                            if callback_data == 'send_audio':
-                                # Ask user to send audio file
-                                prompt_text = "🎤 لطفاً فایل صوتی خود را ارسال کنید."
-                                edit_message(chat_id, message_id, prompt_text)
-                                waiting_for_audio[chat_id] = "waiting_for_audio"
-            
-            # Listen for audio messages from whitelisted users
-            if 'message' in update and 'audio' in update['message']:
-                audio_message = update['message']
-                chat_id = audio_message['chat']['id']
-                audio_file_id = audio_message['audio']['file_id']
-                file_name = audio_message['audio']['file_name']
+        # Get updates with minimal polling time
+        updates = send_request(f"getUpdates?offset={last_update_id + 1}&timeout=1")
+        
+        if updates.get("ok", False) and updates.get("result", []):
+            for update in updates["result"]:
+                last_update_id = update["update_id"]
                 
-                if chat_id in waiting_for_audio and waiting_for_audio[chat_id] == "waiting_for_audio":
-                    # Save audio to MongoDB
-                    audio_data = {
-                        'chat_id': chat_id,
-                        'file_id': audio_file_id,
-                        'file_name': file_name
-                    }
-                    audio_collection.insert_one(audio_data)
+                # Handle message
+                if "message" in update:
+                    message = update["message"]
+                    chat_id = message["chat"]["id"]
+                    user_id = message["from"]["id"]
+                    username = message["from"].get("username", "")
                     
-                    # Send confirmation
-                    send_message(chat_id, f"✅ فایل صوتی شما با نام {file_name} ذخیره شد. اکنون می‌توانید آن را برنامه‌ریزی کنید.")
+                    # Skip if not whitelisted
+                    if username not in WHITELISTED_USERS:
+                        continue
                     
-                    # Clear waiting state
-                    del waiting_for_audio[chat_id]
-            
-            time.sleep(1)
-            
-        except Exception as e:
-            print(f"خطا: {str(e)}")
-            time.sleep(5)
+                    # Handle panel command
+                    if "text" in message and message["text"] == "پنل":
+                        keyboard = {
+                            "inline_keyboard": [
+                                [{"text": "ارسال فایل صوتی", "callback_data": "audio"}]
+                            ]
+                        }
+                        
+                        text = f"""سلام {username}!
+⏰ ساعت: {get_persian_time()}
+به پنل مدیریت خوش آمدید!"""
+                        
+                        send_request("sendMessage", {
+                            "chat_id": chat_id,
+                            "text": text,
+                            "reply_markup": json.dumps(keyboard)
+                        })
+                        
+                        # Reset state
+                        user_states[user_id] = "normal"
+                    
+                    # Handle audio message
+                    elif user_states.get(user_id) == "waiting_audio":
+                        audio_file = None
+                        file_id = None
+                        
+                        # Check for any audio format
+                        for audio_type in ["voice", "audio", "document"]:
+                            if audio_type in message:
+                                audio_file = message[audio_type]
+                                file_id = audio_file["file_id"]
+                                break
+                        
+                        if file_id:
+                            # Get file info
+                            file_info = send_request(f"getFile?file_id={file_id}")
+                            
+                            if file_info.get("ok", False) and "result" in file_info:
+                                file_path = file_info["result"]["file_path"]
+                                download_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+                                
+                                # Download file
+                                try:
+                                    audio_content = requests.get(download_url).content
+                                    timestamp = int(time.time())
+                                    filename = f"{username}_{timestamp}.audio"
+                                    filepath = f"audio_files/{filename}"
+                                    
+                                    with open(filepath, "wb") as f:
+                                        f.write(audio_content)
+                                    
+                                    # Save to MongoDB
+                                    audio_data = {
+                                        "user_id": user_id,
+                                        "username": username,
+                                        "filepath": filepath,
+                                        "timestamp": timestamp,
+                                        "scheduled": False
+                                    }
+                                    
+                                    result = audio_collection.insert_one(audio_data)
+                                    audio_id = str(result.inserted_id)
+                                    
+                                    # Send confirmation with scheduling button
+                                    keyboard = {
+                                        "inline_keyboard": [
+                                            [{"text": "زمانبندی پخش", "callback_data": f"schedule_{audio_id}"}]
+                                        ]
+                                    }
+                                    
+                                    send_request("sendMessage", {
+                                        "chat_id": chat_id,
+                                        "text": "✅ فایل صوتی با موفقیت ذخیره شد!",
+                                        "reply_markup": json.dumps(keyboard)
+                                    })
+                                    
+                                    # Reset state
+                                    user_states[user_id] = "normal"
+                                except Exception as e:
+                                    print(f"Error downloading file: {e}")
+                                    send_request("sendMessage", {
+                                        "chat_id": chat_id,
+                                        "text": "❌ خطا در ذخیره فایل صوتی!"
+                                    })
+                    
+                    # Handle scheduling time input
+                    elif user_states.get(user_id, "").startswith("scheduling_"):
+                        if "text" in message and message["text"].isdigit():
+                            audio_id = user_states[user_id].split("_")[1]
+                            minutes = int(message["text"])
+                            
+                            # Update MongoDB
+                            audio_collection.update_one(
+                                {"_id": ObjectId(audio_id)},
+                                {"$set": {
+                                    "scheduled": True,
+                                    "schedule_time": datetime.now(),
+                                    "minutes": minutes
+                                }}
+                            )
+                            
+                            send_request("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": f"✅ فایل صوتی برای پخش در {to_persian_num(minutes)} دقیقه دیگر زمانبندی شد."
+                            })
+                            
+                            # Reset state
+                            user_states[user_id] = "normal"
+                
+                # Handle callback queries (button clicks)
+                elif "callback_query" in update:
+                    query = update["callback_query"]
+                    query_id = query["id"]
+                    chat_id = query["message"]["chat"]["id"]
+                    message_id = query["message"]["message_id"]
+                    user_id = query["from"]["id"]
+                    data = query["data"]
+                    
+                    # Audio button clicked
+                    if data == "audio":
+                        # Edit message
+                        send_request("editMessageText", {
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "text": "🎵 لطفاً فایل صوتی خود را ارسال کنید."
+                        })
+                        
+                        # Set state to waiting for audio
+                        user_states[user_id] = "waiting_audio"
+                    
+                    # Schedule button clicked
+                    elif data.startswith("schedule_"):
+                        audio_id = data.split("_")[1]
+                        
+                        # Edit message
+                        send_request("editMessageText", {
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "text": "⏰ لطفاً زمان پخش را به دقیقه وارد کنید (مثال: 5)"
+                        })
+                        
+                        # Set state to waiting for schedule time
+                        user_states[user_id] = f"scheduling_{audio_id}"
+                    
+                    # Answer callback query to remove loading state
+                    send_request("answerCallbackQuery", {
+                        "callback_query_id": query_id
+                    })
+        
+        # Ultra short sleep for maximum responsiveness
+        time.sleep(0.01)
 
 if __name__ == "__main__":
-    main()
+    run_bot()
