@@ -1,106 +1,136 @@
-import logging
-from telegram import Update, PhotoSize
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
-import google.generativeai as genai
-from PIL import Image
-import io
+import requests
+import threading
+import json
+import datetime
+import time
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Bot Configuration
+API_TOKEN = "1547814800:qz5gVdxqxhExyUwPmlUM3cK8q6E9yVdgdyuUZJDA"
+BASE_URL = f'https://tapi.bale.ai/bot{API_TOKEN}'
 
-# Configuration
-BOT_TOKEN = "7839187956:AAH5zvalXGCu8aMT9O7YepHdazrM9EpHeEo"
-GEMINI_API_KEY = "AIzaSyCmjsjhm5m8N51ec3Mjl13VEFwMj8C9cGc"
-MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21"
-ALLOWED_GROUP_ID =-1002307718681# Replace with your group's chat_id
+# Whitelisted users (usernames without @)
+WHITELISTED_USERS = ["zonercm"]
 
-# Initialize Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(MODEL_NAME)
+# File paths for automation
+CROSS_FILE_PATH = '/storage/emulated/0/scripts/cross_audio.m4a'
+MADE_FILE_PATH = '/storage/emulated/0/scripts/Made.mp3'
 
-# Conversation History
-conversation_history = {}
+# Scheduled tasks dictionary
+scheduled_tasks = {}
 
-# Create a custom filter class that checks both message format and group
-class RcmFilter(filters.MessageFilter):
-    def filter(self, message):
-        # Only allow messages from the specific group
-        if message.chat.id != ALLOWED_GROUP_ID:
-            return False
-        return message.text and message.text.startswith('/rcm ')
+def to_persian_numerals(text):
+    persian_nums = {'0': '۰', '1': '۱', '2': '۲', '3': '۳', '4': '۴',
+                    '5': '۵', '6': '۶', '7': '۷', '8': '۸', '9': '۹'}
+    return ''.join(persian_nums.get(ch, ch) for ch in text)
 
-rcm_filter = RcmFilter()
+def from_persian_numerals(text):
+    persian_nums = {'۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+                    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'}
+    return ''.join(persian_nums.get(ch, ch) for ch in text)
 
-async def start(update: Update, context: CallbackContext) -> None:
-    """Sends a welcome message on the /start command."""
-    # Only respond in the allowed group
-    if update.message.chat.id != ALLOWED_GROUP_ID:
-        return
-        
-    await update.message.reply_text(
-        "Hi! I'm a chatbot powered by Gemini Flash 2. Use '/rcm <your message>' to chat with me! I only work in this group."
-    )
-    conversation_history[update.message.chat.id] = []
+def get_persian_time():
+    now = datetime.datetime.now()
+    weekday_map = {
+        0: "دوشنبه", 1: "سه‌شنبه", 2: "چهارشنبه",
+        3: "پنج‌شنبه", 4: "جمعه", 5: "شنبه", 6: "یک‌شنبه"
+    }
+    return f"🗓 {weekday_map[now.weekday()]} {to_persian_numerals(f'{now.year}/{now.month}/{now.day}')}\n⏰ ساعت {to_persian_numerals(f'{now.hour}:{now.minute}')}"
 
-async def gemini_response(user_message, chat_id):
-    """Gets a response from the Gemini model."""
-    try:
-        if chat_id not in conversation_history:
-            conversation_history[chat_id] = []
+def get_updates(offset=None):
+    url = f'{BASE_URL}/getUpdates'
+    params = {'timeout': 0, 'allowed_updates': ['message', 'callback_query']}
+    if offset:
+        params['offset'] = offset
+    return requests.get(url, params=params).json()
 
-        chat = model.start_chat(history=conversation_history[chat_id])
-        response = chat.send_message(user_message)
+def send_message(chat_id, text, reply_markup=None):
+    url = f'{BASE_URL}/sendMessage'
+    payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
+    requests.post(url, json=payload)
 
-        if response.prompt_feedback and response.prompt_feedback.block_reason:
-            return f"Gemini blocked this response. Reason: {response.prompt_feedback.block_reason}"
+def edit_message(chat_id, message_id, text, reply_markup=None):
+    url = f'{BASE_URL}/editMessageText'
+    payload = {'chat_id': chat_id, 'message_id': message_id, 'text': text, 'parse_mode': 'HTML'}
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
+    requests.post(url, json=payload)
 
-        gemini_text = response.text
+def send_audio(chat_id, file_path, caption=None):
+    url = f'{BASE_URL}/sendAudio'
+    payload = {'chat_id': chat_id}
+    if caption:
+        payload['caption'] = caption
+    with open(file_path, 'rb') as audio_file:
+        files = {'audio': audio_file}
+        requests.post(url, data=payload, files=files)
 
-        conversation_history[chat_id].append({"role": "user", "parts": [user_message]})
-        conversation_history[chat_id].append({"role": "model", "parts": [gemini_text]})
-
-        return gemini_text
-
-    except Exception as e:
-        logger.error(f"Error during Gemini API call: {e}")
-        return f"Error: Unable to connect to Gemini API. Details: {e}"
-
-async def handle_rcm(update: Update, context: CallbackContext) -> None:
-    """Handles /rcm messages"""
-    # Only process messages from the allowed group
-    if update.message.chat.id != ALLOWED_GROUP_ID:
-        return
-        
-    chat_id = update.message.chat.id
-    message_text = update.message.text[5:].strip()  # Remove "/rcm " prefix
+def schedule_audio_send(chat_id, minutes, file_path, task_id):
+    def send_scheduled_audio():
+        send_audio(chat_id, file_path, caption="✅ فایل برنامه‌ریزی شده شما")
+        scheduled_tasks.pop(task_id, None)
     
-    if not message_text:
-        await update.message.reply_text("Please provide a message after /rcm")
-        return
-    
-    logger.info(f"Processing /rcm message from {chat_id}: {message_text}")
-    response = await gemini_response(message_text, chat_id)
-    await update.message.reply_text(response)
+    timer = threading.Timer(int(minutes) * 60, send_scheduled_audio)
+    timer.daemon = True
+    timer.start()
+    scheduled_tasks[task_id] = timer
 
-def main() -> None:
-    """Starts the bot."""
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+def create_inline_keyboard():
+    return json.dumps({
+        'inline_keyboard': [
+            [{'text': '✖️ Cross', 'callback_data': 'cross'},
+             {'text': '🕋 Made', 'callback_data': 'made'}]
+        ]
+    })
 
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    
-    # Custom handler for /rcm messages using the custom filter class
-    application.add_handler(MessageHandler(
-        filters.TEXT & rcm_filter,
-        handle_rcm
-    ))
+def main():
+    print("🤖 ربات فارسی در حال اجرا است...")
+    offset = None
+    waiting_for_time = {}
 
-    # Start the bot
-    logger.info("Starting bot...")
-    application.run_polling()
+    while True:
+        try:
+            updates = get_updates(offset)
+            if 'result' in updates and updates['result']:
+                for update in updates['result']:
+                    offset = update['update_id'] + 1
+
+                    if 'message' in update and 'text' in update['message']:
+                        message = update['message']
+                        chat_id = message['chat']['id']
+                        text = message['text']
+                        user = message.get('from', {}).get('username', '')
+
+                        if chat_id in waiting_for_time and user in WHITELISTED_USERS:
+                            try:
+                                minutes = int(from_persian_numerals(text))
+                                callback_type = waiting_for_time.pop(chat_id)
+                                file_path = CROSS_FILE_PATH if callback_type == 'cross' else MADE_FILE_PATH
+                                task_id = f"{chat_id}_{int(time.time())}"
+
+                                schedule_audio_send(chat_id, minutes, file_path, task_id)
+                                send_message(chat_id, f"✅ فایل {'Cross' if callback_type == 'cross' else 'Made'} برای {to_persian_numerals(str(minutes))} دقیقه دیگر برنامه‌ریزی شد.")
+                            except ValueError:
+                                send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید.")
+
+                        elif text == "پنل" and user in WHITELISTED_USERS:
+                            greeting = f"🌟 سلام {message.get('from', {}).get('first_name', 'کاربر گرامی')} عزیز!\n\n{get_persian_time()}\n\n⚙️ پنل مدیریت فایل ها:"
+                            send_message(chat_id, greeting, create_inline_keyboard())
+
+                    if 'callback_query' in update:
+                        callback = update['callback_query']
+                        chat_id = callback['message']['chat']['id']
+                        message_id = callback['message']['message_id']
+                        callback_data = callback['data']
+                        user = callback.get('from', {}).get('username', '')
+
+                        if user in WHITELISTED_USERS:
+                            if callback_data in ['cross', 'made']:
+                                waiting_for_time[chat_id] = callback_data
+                                edit_message(chat_id, message_id, f"⏱ لطفاً مدت زمان به دقیقه برای ارسال فایل {callback_data} را وارد کنید:")
+        except Exception as e:
+            print(f"⚠️ خطا: {str(e)}")
 
 if __name__ == "__main__":
     main()
