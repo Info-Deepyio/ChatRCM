@@ -14,13 +14,14 @@ logger = logging.getLogger(__name__)
 TOKEN = "812616487:cRPquvMfuFLC3rOWiHMu3yay8WCu8E1iX6CfWF1c"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
-WHITELIST = ["zonercm", "id_hormoz"]  # Add whitelisted usernames
+WHITELIST = ["zonercm", "your_username_here"]  # Add whitelisted usernames
 
 # Initialize MongoDB with connection pooling
 client = MongoClient(MONGO_URI, maxPoolSize=50)
 db = client[DB_NAME]
 files_collection = db["files"]
-likes_collection = db["likes"]  # For tracking who liked what
+# Track who liked which files to prevent duplicate likes
+likes_collection = db["likes"]
 
 # Create indexes for better performance
 files_collection.create_index("link_id")
@@ -37,7 +38,7 @@ def send_request(method, data):
     """Send requests to Telegram API with session reuse"""
     url = API_URL + method
     try:
-        return session.post(url, json=data, timeout=10).json()
+        return session.post(url, json=data, timeout=5).json()  # Reduced timeout for faster response
     except Exception as e:
         logger.error(f"API request error: {e}")
         return {"ok": False, "error": str(e)}
@@ -53,13 +54,9 @@ def get_persian_time():
 
 def send_panel(chat_id):
     """Send Persian panel with date/time"""
-    text = f"🌟 *پنل مدیریت* 🌟\n\n📆 تاریخ و زمان: `{get_persian_time()}`\n\n📤 برای آپلود فایل جدید، دکمه زیر را فشار دهید:"
+    text = f"🌟 *خوش آمدید!* 🌟\n\n📆 تاریخ: `{get_persian_time()}`\n📂 برای آپلود فایل، دکمه زیر را فشار دهید."
     
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]
-        ]
-    }
+    keyboard = {"inline_keyboard": [[{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]]}
 
     send_request("sendMessage", {
         "chat_id": chat_id, 
@@ -131,23 +128,17 @@ def send_stored_file(chat_id, link_id):
             {"$set": {"downloads": new_download_count}}
         )
 
-        # Send file without buttons
-        send_request("sendDocument", {
-            "chat_id": chat_id,
-            "document": file_data["file_id"]
-        })
-        
-        # Send like/download buttons in a separate message
+        # Send file with updated buttons
         keyboard = {
             "inline_keyboard": [
                 [{"text": f"❤️ {file_data['likes']}", "callback_data": f"like_{link_id}"}],
                 [{"text": f"📥 تعداد دانلود ها: {new_download_count}", "callback_data": f"download_{link_id}"}]
             ]
         }
-        
-        send_request("sendMessage", {
+
+        send_request("sendDocument", {
             "chat_id": chat_id,
-            "text": "فایل با موفقیت دانلود شد:",
+            "document": file_data["file_id"],
             "reply_markup": keyboard
         })
     else:
@@ -162,10 +153,7 @@ def handle_callback(query):
     message_id = query["message"]["message_id"]
     callback_id = query["id"]
     data = query["data"]
-    user_id = query["from"]["id"]
-
-    # First acknowledge the callback to prevent timeout
-    send_request("answerCallbackQuery", {"callback_query_id": callback_id})
+    user_id = query["from"]["id"]  # Get user ID for like tracking
 
     if data.startswith("like_"):
         link_id = data.split("_")[1]
@@ -175,40 +163,65 @@ def handle_callback(query):
             # Check if user already liked this file
             existing_like = likes_collection.find_one({"user_id": user_id, "link_id": link_id})
             
-            if not existing_like:
-                # Add like record and update count
-                likes_collection.insert_one({"user_id": user_id, "link_id": link_id, "created_at": datetime.now()})
-                new_likes = file_data["likes"] + 1
-                files_collection.update_one({"link_id": link_id}, {"$set": {"likes": new_likes}})
-                
-                # Update cache
-                if link_id in link_cache:
-                    link_cache[link_id]["likes"] = new_likes
-                
-                # Update the buttons
-                send_request("editMessageReplyMarkup", {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "reply_markup": {
-                        "inline_keyboard": [
-                            [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
-                            [{"text": f"📥 تعداد دانلود ها: {file_data['downloads']}", "callback_data": f"download_{link_id}"}]
-                        ]
-                    }
-                })
-            else:
-                # Notify user they already liked
+            if existing_like:
+                # Notify user they already liked this file
                 send_request("answerCallbackQuery", {
                     "callback_query_id": callback_id,
-                    "text": "شما قبلاً این فایل را لایک کرده‌اید",
+                    "text": "شما قبلاً این فایل را لایک کرده‌اید!",
                     "show_alert": True
                 })
+                return
+                
+            # Add new like to tracking collection
+            likes_collection.insert_one({"user_id": user_id, "link_id": link_id, "timestamp": datetime.now()})
+            
+            # Update like count
+            new_likes = file_data["likes"] + 1
+            files_collection.update_one({"link_id": link_id}, {"$set": {"likes": new_likes}})
+            
+            # Update cache if present
+            if link_id in link_cache:
+                link_cache[link_id]["likes"] = new_likes
+            
+            # Instantly update the button text
+            send_request("editMessageReplyMarkup", {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": f"❤️ {new_likes}", "callback_data": f"like_{link_id}"}],
+                        [{"text": f"📥 تعداد دانلود ها: {file_data['downloads']}", "callback_data": f"download_{link_id}"}]
+                    ]
+                }
+            })
+            
+            # Notify user their like was registered
+            send_request("answerCallbackQuery", {
+                "callback_query_id": callback_id,
+                "text": "لایک شما ثبت شد!",
+                "show_alert": False
+            })
     
     elif data.startswith("download_"):
         link_id = data.split("_")[1]
+        
+        # Acknowledge the download request
+        send_request("answerCallbackQuery", {
+            "callback_query_id": callback_id,
+            "text": "در حال دانلود فایل...",
+            "show_alert": False
+        })
+        
         send_stored_file(chat_id, link_id)
     
     elif data == "upload_file":
+        # Acknowledge the upload request
+        send_request("answerCallbackQuery", {
+            "callback_query_id": callback_id,
+            "text": "لطفاً فایل خود را ارسال کنید",
+            "show_alert": False
+        })
+        
         send_request("sendMessage", {
             "chat_id": chat_id,
             "text": "📤 لطفاً فایل خود را برای آپلود ارسال کنید."
@@ -228,6 +241,7 @@ def handle_updates(updates):
                     
                     if text == "پنل" and username in WHITELIST:
                         send_panel(chat_id)
+
                     elif text.startswith("/start "):
                         parts = text.split()
                         if len(parts) > 1:
@@ -249,12 +263,11 @@ def start_bot():
     offset = 0
     logger.info("Bot started")
     while True:
-        updates = send_request("getUpdates", {"offset": offset, "timeout": 30})
+        updates = send_request("getUpdates", {"offset": offset, "timeout": 10})  # Shorter timeout for faster response
         if "result" in updates and updates["result"]:
             handle_updates(updates["result"])
             offset = updates["result"][-1]["update_id"] + 1
-        time.sleep(1)  # Small delay to prevent excessive API calls
+        time.sleep(0.1)  # Much smaller delay for super fast response
 
 if __name__ == "__main__":
-    logger.info("Bot started")
     start_bot()
