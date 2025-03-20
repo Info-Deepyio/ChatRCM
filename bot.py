@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 TOKEN = "812616487:cRPquvMfuFLC3rOWiHMu3yay8WCu8E1iX6CfWF1c"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
-WHITELIST = ["zonercm", "your_username_here"]  # Add whitelisted usernames
+WHITELIST = ["zonercm", "id_hormoz"]  # Add whitelisted usernames
 
 # Initialize MongoDB with connection pooling
 client = MongoClient(MONGO_URI, maxPoolSize=50)
