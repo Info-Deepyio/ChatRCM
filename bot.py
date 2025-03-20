@@ -12,8 +12,8 @@ BASE_URL = f'https://tapi.bale.ai/bot{API_TOKEN}'
 WHITELISTED_USERS = ["zonercm"]
 
 # File paths for automation
-CROSS_FILE_PATH = '/storage/emulated/0/scripts/cross_audio.m4a'
-MADE_FILE_PATH = '/storage/emulated/0/scripts/Made.mp3'
+CROSS_FILE_PATH = 'cross_audio.m4a'
+MADE_FILE_PATH = 'Made.mp3'
 
 # Scheduled tasks dictionary
 scheduled_tasks = {}
