@@ -12,10 +12,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "812616487:rRd1o1TYFH1uu3wMsEqX5CvrbgYPSCjO2tcUCQbf"
-MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
+TOKEN = "812616487:rRd1o1TYFH1uu3wMsEqX5CvrbgYPSCjO2tcUCQbf"  # Replace with your token
+MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Your MongoDB URI
 DB_NAME = "uploader_bot"
-WHITELIST = ["zonercm", "id_hormoz"]
+WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
 BROADCAST_STATES = {}  # Track broadcast state for admins
 UPLOAD_STATES = {}
 PASSWORD_REQUEST_STATES = {}  # Track download password requests
@@ -116,11 +116,12 @@ def create_download_link_message(file_data, link_id):
 
     keyboard = {
         "inline_keyboard": [
-            [{"text": f"❤️ {likes_count}", "callback_data": f"like_{link_id}"}],
-            [{"text": f"📥 {downloads_count}", "callback_data": f"download_{link_id}"}]
+            [{"text": f"❤️ تعداد لایک: {likes_count}", "callback_data": f"like_{link_id}"}],
+            [{"text": f"📥 تعداد دانلود: {downloads_count}", "callback_data": f"download_{link_id}"}], # Added download
         ]
     }
     return text, keyboard
+
 
 def handle_file_upload(chat_id, file_id, file_name, password=None):
     """Store file and send link."""
@@ -231,8 +232,9 @@ def handle_callback(query):
         send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
 
     elif data.startswith("download_"):
-        link_id = data.split("_")[1]
-        send_stored_file(chat_id, link_id)  # Start download (password check inside)
+        # Do nothing on download button click, just acknowledge
+        return
+
 
     elif data == "upload_file":
         UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
@@ -248,10 +250,11 @@ def handle_callback(query):
     elif data == "password_no":
         if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
             UPLOAD_STATES[chat_id]["waiting_for_file"] = False
-            del UPLOAD_STATES[chat_id]["waiting_for_password"]
+            # No need to check or delete 'waiting_for_password' it may not exist
             send_request("sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
         else:
             send_request("sendMessage", {"chat_id": chat_id, "text": "ابتدا آپلود کنید."})
+
 
     elif data == "broadcast_menu":
         if username in WHITELIST:
@@ -335,7 +338,7 @@ def handle_updates(updates):
                         link_id = PASSWORD_REQUEST_STATES[chat_id]
                         send_stored_file(chat_id, link_id, text) # Try again with password
                         continue
-
+                    
                     if text == "/upload": #Added
                       UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
                       ask_for_password(chat_id)
