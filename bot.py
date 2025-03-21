@@ -81,23 +81,14 @@ def convert_to_persian_numerals(text):
         text = text.replace(en, fa)
     return text
 
-def send_panel(chat_id, first_time=False):
+def send_panel(chat_id):
     """Send Persian panel with date/time and broadcast option for admins"""
     current_time = get_persian_time()
-    if first_time:
-        text = (
-            f"🎉 به ربات آپلودر خوش آمدید! 🎉\n\n"
-            f"📅 تاریخ: {current_time}\n\n"
-            f"با استفاده از این ربات می‌توانید فایل‌های خود را به راحتی آپلود کرده و لینک دانلود مستقیم دریافت کنید.\n\n"
-            f"برای شروع، روی دکمه‌ی '📤 آپلود فایل' کلیک کنید."
-        )
-    else:
-         text = (
-            f"🌟 بازگشت به پنل اصلی 🌟\n\n"
-            f"📅 تاریخ: {current_time}\n\n"
-            f"برای آپلود فایل جدید، روی دکمه‌ی '📤 آپلود فایل' کلیک کنید."
-        )
-
+    text = (
+        f"🌟 بازگشت به پنل اصلی 🌟\n\n"
+        f"📅 تاریخ: {current_time}\n\n"
+        f"برای آپلود فایل جدید، روی دکمه‌ی '📤 آپلود فایل' کلیک کنید."
+    )
 
     keyboard = {
         "inline_keyboard": [
@@ -421,11 +412,12 @@ def handle_updates(updates):
                 msg = update["message"]
                 chat_id = msg["chat"]["id"]
                 username = msg["from"].get("username", "")
+                first_name = msg["from"].get("first_name", "")  # Get first name
 
                 # Store user in database for future broadcasts
                 users_collection.update_one(
                     {"chat_id": chat_id},
-                    {"$set": {"username": username, "last_active": datetime.now()}},
+                    {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()}}, # Store first name
                     upsert=True
                 )
 
@@ -456,23 +448,44 @@ def handle_updates(updates):
                                 "parse_mode": "Markdown"
                             })
                         return
+
+                    # Handle /start command *separately*
                     if text == "/start":
-                        send_panel(chat_id, first_time=True)  # Greet new users
-                        continue
+                        current_time = get_persian_time()
+                        greet_text = (
+                            f"👋 سلام {first_name} عزیز، به ربات آپلودر خوش آمدید!\n\n"
+                            f"📅 تاریخ: {current_time}\n\n"
+                            "با استفاده از این ربات می‌توانید فایل‌های خود را به راحتی آپلود کرده و لینک دانلود مستقیم دریافت کنید. 📁\n\n"
+                            "برای شروع، روی دکمه‌ی '📤 آپلود فایل' کلیک کنید. 😊"
+                        )
+                        keyboard = {
+                            "inline_keyboard": [
+                                [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}]
+                            ]
+                        }
+                        send_request("sendMessage", {
+                            "chat_id": chat_id,
+                            "text": greet_text,
+                            "parse_mode": "Markdown",
+                            "reply_markup": keyboard  # Show upload button immediately
+                        })
+                        continue  # Important: Prevent further processing
 
 
                     if text == "پنل" and username in WHITELIST:
                         send_panel(chat_id)
                         continue
 
+                    # Handle /start <link_id> *after* the initial /start
                     if text.startswith("/start "):
                         parts = text.split()
                         if len(parts) > 1:
                             link_id = parts[1]
                             send_stored_file(chat_id, link_id)  # Initial request, no password yet
                         else:
-                            send_panel(chat_id)
+                            send_panel(chat_id) #This won't be called now.
                         continue
+
                     # Handle broadcast text message
                     if chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_text":
                         if username in WHITELIST:
