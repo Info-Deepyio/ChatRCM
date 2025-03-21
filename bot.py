@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "812616487:oPFWz7SClLYSEB6Z5UKz2SCWGE36H5q1jcNLirEE"  # Replace with your token
+TOKEN = "812616487:sOBUK13a7q7DN874jFKnusGalkA9nhlxPAeHhLrk"  # Replace with your token
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Your MongoDB URI
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
@@ -359,11 +359,11 @@ def start_bot():
     offset = 0
     logger.info("Bot started")
     while True:
-        updates = send_request("getUpdates", {"offset": offset, "timeout": 10, "limit":100}) # Added limit here
+        updates = send_request("getUpdates", {"offset": offset, "timeout": 30, "limit": 100})  # Keep timeout, increase it.
         if updates and updates.get("result"):
             handle_updates(updates["result"])
             offset = updates["result"][-1]["update_id"] + 1
-        time.sleep(0.05)  # Reduced sleep
+        # Removed time.sleep() - BUT added timeout
 
 if __name__ == "__main__":
     start_bot()
