@@ -338,12 +338,6 @@ def handle_updates(updates):
                         link_id = PASSWORD_REQUEST_STATES[chat_id]
                         send_stored_file(chat_id, link_id, text) # Try again with password
                         continue
-                    
-                    if text == "/upload": #Added
-                      UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
-                      ask_for_password(chat_id)
-                      continue
-
 
                 if "document" in msg and chat_id in UPLOAD_STATES and not UPLOAD_STATES[chat_id].get("waiting_for_password") and not UPLOAD_STATES[chat_id].get("waiting_for_file"):
                     file_id = msg["document"]["file_id"]
