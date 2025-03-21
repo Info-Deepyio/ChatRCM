@@ -306,9 +306,7 @@ def handle_updates(updates):
                         # No inline keyboard for the initial /start message
                         greet_text = (
                             f"👋 سلام {first_name} عزیز، به ربات آپلودر خوش آمدید!\n\n"
-                            f"📅 تاریخ: {current_time}\n\n"
-                            "با استفاده از این ربات می‌توانید فایل‌های خود را به راحتی آپلود کرده و لینک دانلود مستقیم دریافت کنید. 📁\n\n"
-                            "برای شروع، دستور /upload را وارد کنید یا از پنل استفاده کنید. 😊"
+                            f"📅 تاریخ: {current_time}\n\n" 
                         )
                         send_request("sendMessage", {"chat_id": chat_id, "text": greet_text, "parse_mode": "Markdown"})
                         continue
