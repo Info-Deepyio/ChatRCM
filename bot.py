@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "812616487:5SWdBG77YElTWlxMyZssDRGN3k96wzfxJi4KOCWC"  # Replace with your token
+TOKEN = "812616487:oPFWz7SClLYSEB6Z5UKz2SCWGE36H5q1jcNLirEE"  # Replace with your token
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Your MongoDB URI
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
@@ -117,7 +117,7 @@ def create_download_link_message(file_data, link_id):
     keyboard = {
         "inline_keyboard": [
             [{"text": f"❤️ تعداد لایک: {likes_count}", "callback_data": f"like_{link_id}"}],
-            [{"text": f"📥 تعداد دانلود: {downloads_count}", "callback_data": f"download_{link_id}"}], # Added download
+            [{"text": f"📥 تعداد دانلود: {downloads_count}", "callback_data": f"download_{link_id}"}],
         ]
     }
     return text, keyboard
@@ -310,7 +310,7 @@ def handle_updates(updates):
                     if text == "پنل" and username in WHITELIST:
                         send_panel(chat_id)
                         continue
-                    
+
                     # /start LINK_ID handling (AFTER plain /start)
                     if text.startswith("/start "):
                         link_id = text.split(" ", 1)[1]  # Get link_id safely
@@ -359,11 +359,11 @@ def start_bot():
     offset = 0
     logger.info("Bot started")
     while True:
-        updates = send_request("getUpdates", {"offset": offset, "timeout": 10})
+        updates = send_request("getUpdates", {"offset": offset, "timeout": 10, "limit":100}) # Added limit here
         if updates and updates.get("result"):
             handle_updates(updates["result"])
             offset = updates["result"][-1]["update_id"] + 1
-        time.sleep(0.1)  # Small delay
+        time.sleep(0.05)  # Reduced sleep
 
 if __name__ == "__main__":
     start_bot()
