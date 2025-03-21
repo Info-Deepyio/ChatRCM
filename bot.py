@@ -109,7 +109,7 @@ def create_download_link_message(file_data, link_id):
     start_link = f"/start {link_id}"
     text = f"✅ فایل ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
     if file_data['password']:
-        text += f"\n🔑 رمز: ```{file_data['password']}```"
+        text += f"\n🔑 رمز: \n```{file_data['password']}```"
 
     likes_count = convert_to_persian_numerals(str(file_data.get('likes', 0)))
     downloads_count = convert_to_persian_numerals(str(file_data.get('downloads', 0)))
