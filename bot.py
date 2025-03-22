@@ -1,10 +1,11 @@
 import requests
 import random
 import string
-import jdatetime  # For Persian time
+import jdatetime  # For Persian calendar
 from datetime import datetime
 from pymongo import MongoClient
 import logging
+import pytz  # For timezone handling
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -15,12 +16,13 @@ TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"  # Replace with you
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Your MongoDB URI
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
+TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')  # Define Tehran timezone
 
 # State tracking dictionaries
 BROADCAST_STATES = {}
 UPLOAD_STATES = {}
 PASSWORD_REQUEST_STATES = {}
-TEXT_UPLOAD_STATES = {}  # New state for text uploads
+TEXT_UPLOAD_STATES = {}
 
 # Initialize MongoDB
 client = MongoClient(MONGO_URI, maxPoolSize=50)
@@ -28,28 +30,27 @@ db = client[DB_NAME]
 files_collection = db["files"]
 likes_collection = db["likes"]
 users_collection = db["users"]
-texts_collection = db["texts"]  # New collection for text messages
+texts_collection = db["texts"]
 
 # Create indexes
 files_collection.create_index("link_id")
 likes_collection.create_index([("user_id", 1), ("link_id", 1)], unique=True)
 users_collection.create_index("chat_id", unique=True)
-texts_collection.create_index("text_id")  # Index for the text messages
-
+texts_collection.create_index("text_id")
 
 # Telegram API URL
 API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 # Cache
 link_cache = {}
-text_cache = {}  # New cache for text messages
+text_cache = {}
 session = requests.Session()
 
 def send_request(method, data):
     """Send requests, handling errors."""
     url = API_URL + method
     try:
-        response = session.post(url, json=data, timeout=10)  # Keep a reasonable timeout
+        response = session.post(url, json=data, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -59,15 +60,15 @@ def send_request(method, data):
         logger.error(f"JSON decode error: {e}, Response: {response.text}")
         return {"ok": False, "error": str(e)}
 
-
 def generate_link(prefix=""):
-    """Generate a random link ID, optionally with a prefix."""
+    """Generate a random link ID."""
     return prefix + ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
 def get_persian_time():
-    """Get ONLY Persian time (hour and minute), converted to numerals."""
-    now = jdatetime.datetime.now()
-    return convert_to_persian_numerals(now.strftime("%H:%M"))
+    """Get Persian time (hour and minute) in Tehran timezone."""
+    now_tehran = datetime.now(TEHRAN_TIMEZONE)  # Get current time in Tehran
+    jdatetime_now = jdatetime.datetime.fromgregorian(datetime=now_tehran)  # Convert to Jalali
+    return convert_to_persian_numerals(jdatetime_now.strftime("%H:%M"))
 
 def convert_to_persian_numerals(text):
     """Convert English numerals to Persian."""
@@ -77,15 +78,15 @@ def convert_to_persian_numerals(text):
 def send_panel(chat_id):
     """Send the main panel."""
     text = (
-        f"🌟 بازگشت به پنل اصلی 🌟\n\n"
+        "🌟 بازگشت به پنل اصلی 🌟\n\n"
         f"⏰ ساعت: {get_persian_time()}\n\n"
-        f"برای آپلود فایل، روی '📤 آپلود فایل' کلیک کنید.\n"
-        f"برای آپلود متن، روی '📝 آپلود متن' کلیک کنید."
+        "برای آپلود فایل، روی '📤 آپلود فایل' کلیک کنید.\n"
+        "برای آپلود متن، روی '📝 آپلود متن' کلیک کنید."
     )
     keyboard = {
         "inline_keyboard": [
             [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}],
-            [{"text": "📝 آپلود متن", "callback_data": "upload_text"}],  # New button
+            [{"text": "📝 آپلود متن", "callback_data": "upload_text"}],
             [{"text": "📢 ارسال پیام", "callback_data": "broadcast_menu"}]
         ]
     }
@@ -102,7 +103,6 @@ def send_broadcast_menu(chat_id):
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
-
 def ask_for_password(chat_id):
     """Ask if the file needs a password."""
     text = "🔒 آیا فایل نیاز به رمز دارد؟"
@@ -113,8 +113,6 @@ def ask_for_password(chat_id):
         ]
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
-
-
 
 def create_download_link_message(file_data, link_id):
     """Creates the download link message."""
@@ -148,9 +146,8 @@ def handle_file_upload(chat_id, file_id, file_name, password=None):
     text, keyboard = create_download_link_message(file_data, link_id)
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
 
-
 def get_file_data(link_id):
-    """Get file data from cache or DB."""
+    """Get file data (cache or DB)."""
     if link_id in link_cache:
         return link_cache[link_id]
     file_data = files_collection.find_one({"link_id": link_id})
@@ -161,7 +158,6 @@ def get_file_data(link_id):
         return file_data_for_cache
     return None
 
-
 def send_stored_file(chat_id, link_id, provided_password=None):
     """Sends the stored file."""
     file_data = get_file_data(link_id)
@@ -169,26 +165,23 @@ def send_stored_file(chat_id, link_id, provided_password=None):
         send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
         return
     if file_data["password"] and provided_password != file_data["password"]:
-         if chat_id not in PASSWORD_REQUEST_STATES:
-            send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 رمز را وارد کنید یا /cancel بزنید."})
-            PASSWORD_REQUEST_STATES[chat_id] = link_id
-            return
-         else:
-            send_request("sendMessage", {"chat_id": chat_id, "text": "❌ رمز اشتباه. دانلود لغو شد."})
-            if chat_id in PASSWORD_REQUEST_STATES:
-                del PASSWORD_REQUEST_STATES[chat_id]
-            return
+        if chat_id not in PASSWORD_REQUEST_STATES:
+           send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 رمز را وارد کنید یا /cancel بزنید."})
+           PASSWORD_REQUEST_STATES[chat_id] = link_id
+           return
+        else:
+           send_request("sendMessage", {"chat_id": chat_id, "text": "❌ رمز اشتباه. دانلود لغو شد."})
+           if chat_id in PASSWORD_REQUEST_STATES:
+               del PASSWORD_REQUEST_STATES[chat_id]
+           return
     file_data["downloads"] = file_data.get("downloads", 0) + 1
     files_collection.update_one({"link_id": link_id}, {"$set": {"downloads": file_data["downloads"]}})
     if link_id in link_cache:
         link_cache[link_id]["downloads"] = file_data["downloads"]
     text, keyboard = create_download_link_message(file_data, link_id)
     send_request("sendDocument", {"chat_id": chat_id, "document": file_data["file_id"], "reply_markup": keyboard})
-
     if chat_id in PASSWORD_REQUEST_STATES:
         del PASSWORD_REQUEST_STATES[chat_id]
-
-
 
 def broadcast_message(message_type, content):
     """Broadcast a message."""
@@ -202,50 +195,36 @@ def broadcast_message(message_type, content):
     return sent_count
 
 def handle_text_upload(chat_id, text_message):
-    """Handles text upload, stores it, and sends a link."""
-    text_id = generate_link("t")  # Use a prefix to distinguish text links
-    text_data = {
-        "text_id": text_id,
-        "text": text_message,
-        "created_at": datetime.now(),
-    }
+    """Handles text upload."""
+    text_id = generate_link("t")
+    text_data = {"text_id": text_id, "text": text_message, "created_at": datetime.now()}
     texts_collection.insert_one(text_data)
-
-    # Cache the text data
     text_data_for_cache = text_data.copy()
     del text_data_for_cache["_id"]
     text_cache[text_id] = text_data_for_cache
-
     start_link = f"/start {text_id}"
-    response_text = (
-        f"✅ متن ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
-    )
+    response_text = f"✅ متن ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
     send_request("sendMessage", {"chat_id": chat_id, "text": response_text, "parse_mode": "Markdown"})
 
 def get_text_data(text_id):
-    """Retrieves text data from cache or database."""
+    """Retrieves text data (cache/DB)."""
     if text_id in text_cache:
         return text_cache[text_id]
-
     text_data = texts_collection.find_one({"text_id": text_id})
     if text_data:
         text_data_for_cache = text_data.copy()
         del text_data_for_cache["_id"]
-        text_cache[text_id] = text_data_for_cache  # Update cache
+        text_cache[text_id] = text_data_for_cache
         return text_data_for_cache
-
     return None
 
 def send_stored_text(chat_id, text_id):
-    """Sends the stored text message."""
+    """Sends stored text."""
     text_data = get_text_data(text_id)
     if not text_data:
         send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
         return
-
     send_request("sendMessage", {"chat_id": chat_id, "text": text_data["text"]})
-
-
 
 def handle_callback(query):
     """Handles callback queries."""
@@ -254,24 +233,14 @@ def handle_callback(query):
     data = query["data"]
     user_id = query["from"]["id"]
     username = query["from"].get("username", "")
+
+    # *** ABSOLUTELY FIRST: Acknowledge the callback ***
     send_request("answerCallbackQuery", {"callback_query_id": query["id"]})
 
     if data.startswith("like_"):
-        link_id = data.split("_")[1]
-        file_data = get_file_data(link_id)
-        if not file_data or likes_collection.find_one({"user_id": user_id, "link_id": link_id}):
-            return
-        likes_collection.insert_one({"user_id": user_id, "link_id": link_id, "timestamp": datetime.now()})
-        file_data["likes"] = file_data.get("likes", 0) + 1
-        files_collection.update_one({"link_id": link_id}, {"$set": {"likes": file_data["likes"]}})
-        if link_id in link_cache:
-            link_cache[link_id]["likes"] = file_data["likes"]
-        text, keyboard = create_download_link_message(file_data, link_id)
-        send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
-
+        process_like(chat_id, message_id, data, user_id)
     elif data.startswith("download_"):
-        return
-
+        return  # Nothing to do
     elif data == "upload_file":
         UPLOAD_STATES[chat_id] = {"waiting_for_password": True, "password": None}
         ask_for_password(chat_id)
@@ -286,23 +255,33 @@ def handle_callback(query):
     elif data == "upload_text":
         TEXT_UPLOAD_STATES[chat_id] = "waiting_for_text"
         send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن خود را برای آپلود وارد کنید:"})
-
     elif data == "broadcast_menu":
-        if username in WHITELIST:
-            send_broadcast_menu(chat_id)
-        else:
-            send_request("answerCallbackQuery", {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
+        if username in WHITELIST:  send_broadcast_menu(chat_id)
+        else: send_request("answerCallbackQuery", {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
     elif data == "broadcast_text":
         if username in WHITELIST:
             BROADCAST_STATES[chat_id] = "waiting_for_text"
             send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن را وارد کنید:", "parse_mode": "Markdown"})
-        else:
-            send_request("answerCallbackQuery", {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
+        else: send_request("answerCallbackQuery", {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
     elif data == "back_to_panel":
-        if chat_id in BROADCAST_STATES:
-            del BROADCAST_STATES[chat_id]
+        if chat_id in BROADCAST_STATES: del(BROADCAST_STATES[chat_id])
         send_panel(chat_id)
+    # Add other callback data handlers here
 
+def process_like(chat_id, message_id, data, user_id):
+    """Handles the like button press."""
+    link_id = data.split("_")[1]
+    file_data = get_file_data(link_id)
+    if not file_data or likes_collection.find_one({"user_id": user_id, "link_id": link_id}):
+        return  # Already liked or file doesn't exist
+
+    likes_collection.insert_one({"user_id": user_id, "link_id": link_id, "timestamp": datetime.now()})
+    file_data["likes"] = file_data.get("likes", 0) + 1
+    files_collection.update_one({"link_id": link_id}, {"$set": {"likes": file_data["likes"]}})
+    if link_id in link_cache:
+        link_cache[link_id]["likes"] = file_data["likes"]
+    text, keyboard = create_download_link_message(file_data, link_id)
+    send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
 
 
 def handle_updates(updates):
@@ -318,39 +297,26 @@ def handle_updates(updates):
 
                 if "text" in msg:
                     text = msg["text"]
-
                     if text == "/cancel":
-                        if chat_id in BROADCAST_STATES:
-                            del BROADCAST_STATES[chat_id]
-                        elif chat_id in UPLOAD_STATES:
-                            del UPLOAD_STATES[chat_id]
-                        elif chat_id in PASSWORD_REQUEST_STATES:
-                            del PASSWORD_REQUEST_STATES[chat_id]
-                        elif chat_id in TEXT_UPLOAD_STATES:  # Cancel text upload
+                        if chat_id in BROADCAST_STATES: del(BROADCAST_STATES[chat_id])
+                        elif chat_id in UPLOAD_STATES: del(UPLOAD_STATES[chat_id])
+                        elif chat_id in PASSWORD_REQUEST_STATES: del(PASSWORD_REQUEST_STATES[chat_id])
+                        elif chat_id in TEXT_UPLOAD_STATES:
                             del TEXT_UPLOAD_STATES[chat_id]
                             send_request("sendMessage", {"chat_id": chat_id, "text": "❌ آپلود متن لغو شد."})
                         return
-
                     if text == "/start":
-                        greet_text = (
-                            f"👋 سلام {first_name} عزیز، خوش آمدید!\n\n"
-                            f"⏰ ساعت: {get_persian_time()}"
-                        )
+                        greet_text = ( f"👋 سلام {first_name} عزیز، خوش آمدید!\n\n" f"⏰ ساعت: {get_persian_time()}")
                         send_request("sendMessage", {"chat_id": chat_id, "text": greet_text, "parse_mode": "Markdown"})
                         continue
-
                     if text == "پنل" and username in WHITELIST:
                         send_panel(chat_id)
                         continue
-
                     if text.startswith("/start "):
                         link_id = text.split(" ", 1)[1]
-                        if link_id.startswith("t"):
-                            send_stored_text(chat_id, link_id)  # Handle text links
-                        else:
-                            send_stored_file(chat_id, link_id) # Handle Files
+                        if link_id.startswith("t"): send_stored_text(chat_id, link_id)
+                        else: send_stored_file(chat_id, link_id)
                         continue
-
                     if chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_text":
                         if username in WHITELIST:
                             del BROADCAST_STATES[chat_id]
@@ -374,7 +340,7 @@ def handle_updates(updates):
 
                     if chat_id in TEXT_UPLOAD_STATES and TEXT_UPLOAD_STATES[chat_id] == "waiting_for_text":
                         del TEXT_UPLOAD_STATES[chat_id]
-                        handle_text_upload(chat_id, text)  # Process the uploaded text
+                        handle_text_upload(chat_id, text)
                         continue
 
                 if "document" in msg and chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
@@ -402,6 +368,10 @@ def start_bot():
             if updates and updates.get("result"):
                 handle_updates(updates["result"])
                 offset = updates["result"][-1]["update_id"] + 1
+            elif not updates or not updates.get("ok"):
+                # Handle cases where getUpdates fails or returns an empty result
+                logger.warning(f"getUpdates returned an unexpected result: {updates}")
+                time.sleep(5)  # Wait a bit before retrying
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
             logger.exception(e)
