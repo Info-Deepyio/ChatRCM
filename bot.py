@@ -7,7 +7,7 @@ from datetime import datetime
 from pymongo import MongoClient
 import logging
 
-# Configure logging
+# Configure logging (enhanced for debugging)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -17,17 +17,17 @@ MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.r
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
 BROADCAST_STATES = {}  # Track broadcast state for admins
-UPLOAD_STATES = {}
+UPLOAD_STATES = {} #Track upload state
 PASSWORD_REQUEST_STATES = {}  # Track download password requests
 
-# Initialize MongoDB
+# Initialize MongoDB (connection pooling is already handled)
 client = MongoClient(MONGO_URI, maxPoolSize=50)
 db = client[DB_NAME]
 files_collection = db["files"]
 likes_collection = db["likes"]
 users_collection = db["users"]
 
-# Create indexes
+# Create indexes (these are good)
 files_collection.create_index("link_id")
 likes_collection.create_index([("user_id", 1), ("link_id", 1)], unique=True)
 users_collection.create_index("chat_id", unique=True)
@@ -35,37 +35,43 @@ users_collection.create_index("chat_id", unique=True)
 # Telegram API URL
 API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
-# Cache
+# Cache (for link_id -> file_data)
 link_cache = {}
 session = requests.Session()  # Use a session for connection pooling
+
 
 def send_request(method, data):
     """Send requests, handling errors and returning JSON."""
     url = API_URL + method
     try:
         response = session.post(url, json=data, timeout=10)
-        response.raise_for_status()  # Raise HTTPError for bad responses
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"API request error: {e}")
-        return {"ok": False, "error": str(e)}
-    except ValueError as e:
+        # Log more context: method, data, and specific error
+        logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
+        return {"ok": False, "error": str(e)}  # More informative error
+    except ValueError as e:  # JSONDecodeError in Python 3.6+
         logger.error(f"JSON decode error: {e}, Response: {response.text}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e)}  # More informative error
+
 
 def generate_link():
     """Generate a random link ID."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+
 
 def get_persian_time():
     """Get Persian time, converted to numerals."""
     now = jdatetime.datetime.now()
     return convert_to_persian_numerals(now.strftime("%Y/%m/%d - %H:%M"))
 
+
 def convert_to_persian_numerals(text):
     """Convert English numerals to Persian."""
     persian_numerals = str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹')
     return text.translate(persian_numerals)
+
 
 def send_panel(chat_id):
     """Send the main panel."""
@@ -81,6 +87,7 @@ def send_panel(chat_id):
         ]
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
+
 
 def send_broadcast_menu(chat_id):
     """Send broadcast menu."""
@@ -104,6 +111,7 @@ def ask_for_password(chat_id):
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
+
 def create_download_link_message(file_data, link_id):
     """Creates the download link message with like/download buttons."""
     start_link = f"/start {link_id}"
@@ -124,11 +132,16 @@ def create_download_link_message(file_data, link_id):
 
 
 def handle_file_upload(chat_id, file_id, file_name, password=None):
-    """Store file and send link."""
+    """Store file in DB, update cache, and send link."""
     link_id = generate_link()
     file_data = {
-        "link_id": link_id, "file_id": file_id, "file_name": file_name,
-        "likes": 0, "downloads": 0, "created_at": datetime.now(), "password": password
+        "link_id": link_id,
+        "file_id": file_id,
+        "file_name": file_name,
+        "likes": 0,
+        "downloads": 0,
+        "created_at": datetime.now(),
+        "password": password
     }
     files_collection.insert_one(file_data)
 
@@ -141,17 +154,22 @@ def handle_file_upload(chat_id, file_id, file_name, password=None):
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
 
 
+
 def get_file_data(link_id):
-    """Get file data from cache or DB."""
+    """Get file data from cache or DB, updating cache if necessary."""
     if link_id in link_cache:
         return link_cache[link_id]
+
     file_data = files_collection.find_one({"link_id": link_id})
     if file_data:
+        # Update cache (important for consistency)
         file_data_for_cache = file_data.copy()
-        del file_data_for_cache["_id"]
-        link_cache[link_id] = file_data_for_cache  # Update cache
+        del file_data_for_cache["_id"]  # _id is not JSON serializable
+        link_cache[link_id] = file_data_for_cache
         return link_cache[link_id]
-    return None
+
+    return None  # File not found
+
 
 def send_stored_file(chat_id, link_id, provided_password=None):
     """Retrieve and send file, checking password if needed."""
@@ -185,19 +203,24 @@ def send_stored_file(chat_id, link_id, provided_password=None):
     if chat_id in PASSWORD_REQUEST_STATES:
       del PASSWORD_REQUEST_STATES[chat_id]
 
+
+
 def broadcast_message(message_type, content):
-    """Broadcast a message."""
+    """Broadcast a message to all users."""
     sent_count = 0
     for user in users_collection.find({}):
         chat_id = user["chat_id"]
         if message_type == "text":
             result = send_request("sendMessage", {"chat_id": chat_id, "text": content, "parse_mode": "Markdown"})
+        # Add other message types here (e.g., "document", "photo") if needed
+
         if result and result.get("ok"):
             sent_count += 1
     return sent_count
 
+
 def handle_callback(query):
-    """Handle button clicks."""
+    """Handle button clicks (callback queries)."""
     chat_id = query["message"]["chat"]["id"]
     message_id = query["message"]["message_id"]
     callback_id = query["id"]
@@ -205,7 +228,7 @@ def handle_callback(query):
     user_id = query["from"]["id"]
     username = query["from"].get("username", "")
 
-    # Always acknowledge immediately for responsiveness
+    # *Always* acknowledge immediately for responsiveness
     send_request("answerCallbackQuery", {"callback_query_id": callback_id})
 
     if data.startswith("like_"):
@@ -213,12 +236,14 @@ def handle_callback(query):
         file_data = get_file_data(link_id)  # Get from cache/DB
 
         if not file_data:
-            return  # File not found
+            return  # File not found (shouldn't happen, but handle it)
 
+        # Check if user already liked
         existing_like = likes_collection.find_one({"user_id": user_id, "link_id": link_id})
         if existing_like:
             return  # Already liked
 
+        # Record the like (both in DB and cache)
         likes_collection.insert_one({"user_id": user_id, "link_id": link_id, "timestamp": datetime.now()})
 
         # Update likes (both in DB and cache)
@@ -231,26 +256,25 @@ def handle_callback(query):
         text, keyboard = create_download_link_message(file_data, link_id)
         send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
 
+
     elif data.startswith("download_"):
         # Do nothing on download button click, just acknowledge
         return
 
-
     elif data == "upload_file":
-        UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
+        UPLOAD_STATES[chat_id] = {"waiting_for_password": True, "password": None}
         ask_for_password(chat_id)
 
     elif data == "password_yes":
-        if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
-            UPLOAD_STATES[chat_id]["waiting_for_password"] = True
+        if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password"):
+            UPLOAD_STATES[chat_id]["waiting_for_password_input"] = True
             send_request("sendMessage", {"chat_id": chat_id, "text": "🔑 رمز را وارد کنید:"})
         else:
             send_request("sendMessage", {"chat_id": chat_id, "text": "ابتدا آپلود کنید."})
 
     elif data == "password_no":
-        if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
-            UPLOAD_STATES[chat_id]["waiting_for_file"] = False
-            # No need to check or delete 'waiting_for_password' it may not exist
+        if chat_id in UPLOAD_STATES:
+            UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
             send_request("sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
         else:
             send_request("sendMessage", {"chat_id": chat_id, "text": "ابتدا آپلود کنید."})
@@ -266,21 +290,30 @@ def handle_callback(query):
         if username in WHITELIST:
             BROADCAST_STATES[chat_id] = "waiting_for_text"
             send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن را وارد کنید:", "parse_mode": "Markdown"})
+        else:
+            # This else condition was MISSING.  Important for security.
+            send_request("answerCallbackQuery", {"callback_query_id": callback_id, "text": "دسترسی ندارید!", "show_alert": True})
 
     elif data == "back_to_panel":
         if chat_id in BROADCAST_STATES:
             del BROADCAST_STATES[chat_id]
         send_panel(chat_id)
 
+    # Add other callback data handlers here
+
+
 def handle_updates(updates):
     """Process updates."""
     for update in updates:
+        logger.debug(f"Received update: {update}")  # Log the raw update
         try:
             if "message" in update:
                 msg = update["message"]
                 chat_id = msg["chat"]["id"]
                 username = msg["from"].get("username", "")
                 first_name = msg["from"].get("first_name", "")
+
+                # Update user info (upsert = insert if not exists, update if exists)
                 users_collection.update_one({"chat_id": chat_id}, {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()}}, upsert=True)
 
                 if "text" in msg:
@@ -317,53 +350,68 @@ def handle_updates(updates):
                         send_stored_file(chat_id, link_id) #Handles password
                         continue
 
-
+                    # Handle broadcast message input
                     if chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_text":
                         if username in WHITELIST:
                             del BROADCAST_STATES[chat_id]
                             send_request("sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
-                            sent_count = broadcast_message("text", text)
+                            sent_count = broadcast_message("text", text)  # Actually broadcast
                             send_request("sendMessage", {"chat_id": chat_id, "text": f"✅ به {convert_to_persian_numerals(str(sent_count))} کاربر ارسال شد."})
-                        continue
+                        continue  # Important to prevent further processing
 
-                    if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password"):
+                    if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password_input"):
                         password = text
                         UPLOAD_STATES[chat_id]["password"] = password
-                        del UPLOAD_STATES[chat_id]["waiting_for_password"]
-                        UPLOAD_STATES[chat_id]["waiting_for_file"] = False
+                        del UPLOAD_STATES[chat_id]["waiting_for_password_input"]
+                        UPLOAD_STATES[chat_id]["waiting_for_file"] = True
                         send_request("sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
                         continue
+
 
                     if chat_id in PASSWORD_REQUEST_STATES:
                         link_id = PASSWORD_REQUEST_STATES[chat_id]
                         send_stored_file(chat_id, link_id, text) # Try again with password
                         continue
 
-                if "document" in msg and chat_id in UPLOAD_STATES and not UPLOAD_STATES[chat_id].get("waiting_for_password") and not UPLOAD_STATES[chat_id].get("waiting_for_file"):
+                # Handle file uploads
+                if "document" in msg and chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
                     file_id = msg["document"]["file_id"]
-                    file_name = msg["document"].get("file_name", "unnamed_file")
-                    password = UPLOAD_STATES[chat_id].get("password")
+                    file_name = msg["document"].get("file_name", "unnamed_file")  # Default file name
+                    password = UPLOAD_STATES[chat_id].get("password") #Gets password
                     handle_file_upload(chat_id, file_id, file_name, password)
-                    del UPLOAD_STATES[chat_id]  # Clean up
-                    continue
+                    del UPLOAD_STATES[chat_id]  # Clean up state
+                    continue  # Prevent further processing
+
+
 
             elif "callback_query" in update:
-                handle_callback(update["callback_query"])
+                handle_callback(update["callback_query"])  # Already defined
 
         except Exception as e:
             logger.error(f"Error handling update: {e}")
-            logger.exception(e)
+            logger.exception(e)  # Log the full traceback
+
 
 def start_bot():
-    """Start bot."""
+    """Start the bot and keep it running."""
     offset = 0
     logger.info("Bot started")
     while True:
-        updates = send_request("getUpdates", {"offset": offset, "timeout": 30, "limit": 100})  # Keep timeout, increase it.
-        if updates and updates.get("result"):
-            handle_updates(updates["result"])
-            offset = updates["result"][-1]["update_id"] + 1
-        # Removed time.sleep() - BUT added timeout
+        try:
+            # Use long polling with a high timeout (e.g., 60 seconds)
+            updates = send_request("getUpdates", {"offset": offset, "timeout": 180, "limit": 100})  # Keep timeout, increase it.
+
+            if updates and updates.get("result"):
+                handle_updates(updates["result"])
+                # Update offset to avoid processing the same updates again
+                offset = updates["result"][-1]["update_id"] + 1
+
+        except Exception as e:
+            logger.error(f"Error in main loop: {e}")
+            logger.exception(e)  # Log the full traceback
+            # Add a short delay before retrying to avoid overwhelming the API
+            time.sleep(5)
+
 
 if __name__ == "__main__":
     start_bot()
