@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "812616487:M4lS5AzOUU5tguQWArLj8sG5QDA3IxcT8eXfVBSa"  # Replace with your token
+TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"  # Replace with your token
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Your MongoDB URI
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Usernames allowed to use admin features
