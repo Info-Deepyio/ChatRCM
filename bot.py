@@ -138,7 +138,7 @@ def create_download_link_message(file_data, link_id):
     downloads_count = convert_to_persian_numerals(str(file_data.get('downloads', 0)))
     keyboard = {
         "inline_keyboard": [
-            [{"text": f"❤️ {likes_count}", "callback_data": f"like_{link_id}"}],
+            [{"text": f"تعداد دانلود:❤️ {likes_count}", "callback_data": f"like_{link_id}"}],
             [{"text": f"📥 {downloads_count}", "callback_data": f"download_{link_id}"}],
         ]
     }
