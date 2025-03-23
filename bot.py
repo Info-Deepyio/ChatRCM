@@ -13,8 +13,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "YOUR_BALE_BOT_TOKEN"  # Replace
-MONGO_URI = "YOUR_MONGO_URI"  # Replace
+TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"  # Replace
+MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"  # Replace
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]  # Replace with your whitelisted usernames
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
