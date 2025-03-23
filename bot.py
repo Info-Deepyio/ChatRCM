@@ -8,8 +8,8 @@ import pytz
 import time
 from pymongo import MongoClient, errors
 
-TOKEN = "YOUR_BALE_BOT_TOKEN"
-MONGO_URI = "YOUR_MONGODB_URI"
+TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"
+MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz"]
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
