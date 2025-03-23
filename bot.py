@@ -32,7 +32,7 @@ files_collection = db["files"]
 likes_collection = db["likes"]
 users_collection = db["users"]
 texts_collection = db["texts"]
-referrals_collection = db["referrals"]  # New collection for referrals
+referrals_collection = db["referrals"]
 
 
 # Indexes
@@ -40,8 +40,8 @@ files_collection.create_index("link_id")
 likes_collection.create_index([("user_id", 1), ("link_id", 1)], unique=True)
 users_collection.create_index("chat_id", unique=True)
 texts_collection.create_index("text_id")
-referrals_collection.create_index([("referrer_id", 1), ("referred_id", 1)], unique=True) # Prevent duplicate referrals
-referrals_collection.create_index("referrer_id")  # Index for faster querying
+referrals_collection.create_index([("referrer_id", 1), ("referred_id", 1)], unique=True)
+referrals_collection.create_index("referrer_id")
 
 
 # Telegram API URL
@@ -50,7 +50,7 @@ API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 # Caches
 link_cache = {}
 text_cache = {}
-user_cache = {}  # New cache for user data
+user_cache = {}
 session = requests.Session()
 
 
@@ -59,12 +59,11 @@ def send_request(method, data):
     url = API_URL + method
     try:
         response = session.post(url, json=data, timeout=10)
-        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 401:  # Unauthorized - Likely token issue
+        if e.response.status_code == 401:
             logger.error(f"API request error: 401 Unauthorized.  Possible token expiration. Method: {method}, Data: {data}")
-            #  Don't raise the exception. Let the loop continue.
             return {"ok": False, "error": "401 Unauthorized"}
         else:
             logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
@@ -109,7 +108,7 @@ def send_panel(chat_id):
             [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}],
             [{"text": "📝 آپلود متن", "callback_data": "upload_text"}],
             [{"text": "📢 ارسال پیام", "callback_data": "broadcast_menu"}],
-            [{"text": "📊 تعداد نشر کاربران", "callback_data": "referral_stats"}] # Added referral stats button
+            [{"text": "📊 تعداد نشر کاربران", "callback_data": "referral_stats"}]
         ]
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
@@ -142,10 +141,9 @@ def create_download_link_message(file_data, link_id):
     """Creates a download link message. Handles potential missing keys safely."""
     start_link = f"/start {link_id}"
     text = f"✅ فایل ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
-    if file_data.get('password'):  # Safely check for password
+    if file_data.get('password'):
         text += f"\n🔑 رمز: \n```{file_data['password']}```"
 
-    # Use .get() with defaults for likes and downloads to handle missing keys
     likes_count = convert_to_persian_numerals(str(file_data.get('likes', 0)))
     downloads_count = convert_to_persian_numerals(str(file_data.get('downloads', 0)))
 
@@ -159,11 +157,11 @@ def create_download_link_message(file_data, link_id):
 
 # --- Referral System Functions ---
 
-def send_referral_link(chat_id, user_id):
-    """Sends the referral link request to the user."""
-    text = "برای دریافت لینک نشر خود از دکمه زیر استفاده کنید:"
+def send_referral_link_request(chat_id, user_id):
+    """Sends the initial referral link request with an inline keyboard."""
+    text = "برای دریافت لینک نشر خود، روی دکمه زیر کلیک کنید:"
     keyboard = {
-        "inline_keyboard" : [
+        "inline_keyboard": [
             [{"text": "🔗 دریافت لینک", "callback_data": f"get_referral_{user_id}"}]
         ]
     }
@@ -172,8 +170,8 @@ def send_referral_link(chat_id, user_id):
 def send_actual_referral_link(chat_id, user_id):
     """Sends the actual referral link after the button is pressed."""
     referral_link = f"ble.ir/uploadd_bot?start={user_id}"
-    text = f"🔗 لینک نظر شما:\n```\n{referral_link}\n```"
-    send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
+    text = f"🔗 لینک اختصاصی شما:\n\n{referral_link}"  # No Markdown formatting here
+    send_request("sendMessage", {"chat_id": chat_id, "text": text})
 
 
 def get_referral_stats():
@@ -192,7 +190,7 @@ def get_referral_stats():
             "_id": 0,
             "chat_id": "$_id",
             "username": "$user_info.username",
-            "first_name": "$user_info.first_name",  # Include first_name
+            "first_name": "$user_info.first_name",
             "count": 1
         }}
     ]
@@ -204,7 +202,7 @@ def get_referral_stats():
     message_text = "📊 آمار نشر کاربران:\n\n"
     for stat in stats:
         username = stat.get('username', 'نامشخص')
-        first_name = stat.get('first_name', 'نامشخص') # Get first name.
+        first_name = stat.get('first_name', 'نامشخص')
         message_text += (f"👤 کاربر: {first_name} ({username}) (ID: {stat['chat_id']}) - "
                          f"تعداد نشر: {convert_to_persian_numerals(str(stat['count']))}\n")
     return message_text
@@ -218,10 +216,9 @@ def record_referral(referrer_id, referred_id):
         referrals_collection.insert_one({"referrer_id": referrer_id, "referred_id": referred_id, "timestamp": datetime.now()})
         logger.info(f"Referral recorded: {referrer_id} referred {referred_id}")
     except errors.DuplicateKeyError:
-        logger.info(f"Duplicate referral attempt: {referrer_id} referred {referred_id}")  # Log but don't raise
+        logger.info(f"Duplicate referral attempt: {referrer_id} referred {referred_id}")
     except errors.PyMongoError as e:
         logger.error(f"MongoDB error recording referral: {e}")
-        # Consider sending a message to the user.
 
 # --- File Handling ---
 
@@ -239,11 +236,10 @@ def handle_file_upload(chat_id, file_id, file_name, password=None):
     }
     try:
         files_collection.insert_one(file_data)
-        # Cache immediately. Create a copy to avoid modifying the cached version directly.
         file_data_for_cache = file_data.copy()
-        del file_data_for_cache["_id"]  # Remove MongoDB's internal ID
+        del file_data_for_cache["_id"]
         link_cache[link_id] = file_data_for_cache
-        text, keyboard = create_download_link_message(file_data_for_cache, link_id)  # Use cached data
+        text, keyboard = create_download_link_message(file_data_for_cache, link_id)
         send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
     except errors.PyMongoError as e:
         logger.error(f"MongoDB error during file upload: {e}")
@@ -254,13 +250,13 @@ def handle_file_upload(chat_id, file_id, file_name, password=None):
 def get_file_data(link_id):
     """Gets file data (cached or from DB).  Returns a *copy* of cached data."""
     if link_id in link_cache:
-        return link_cache[link_id].copy()  # Return a COPY
+        return link_cache[link_id].copy()
 
     file_data = files_collection.find_one({"link_id": link_id},
                                          {"_id": 0, "link_id": 1, "file_id": 1, "file_name": 1, "likes": 1,
                                           "downloads": 1, "password": 1})
     if file_data:
-        link_cache[link_id] = file_data  # Update cache
+        link_cache[link_id] = file_data
         return file_data
     return None
 
@@ -272,7 +268,7 @@ def send_stored_file(chat_id, link_id, provided_password=None):
         send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
         return
 
-    if file_data.get("password") and provided_password != file_data["password"]:  # Safe password check
+    if file_data.get("password") and provided_password != file_data["password"]:
         if chat_id not in PASSWORD_REQUEST_STATES:
             send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 رمز را وارد کنید یا /cancel بزنید."})
             PASSWORD_REQUEST_STATES[chat_id] = link_id
@@ -281,20 +277,18 @@ def send_stored_file(chat_id, link_id, provided_password=None):
         if chat_id in PASSWORD_REQUEST_STATES:
             del PASSWORD_REQUEST_STATES[chat_id]
         return
-    # Use find_one_and_update for atomic update of downloads.
     updated_file_data = files_collection.find_one_and_update(
         {"link_id": link_id},
         {"$inc": {"downloads": 1}},
         return_document=True
     )
     if updated_file_data:
-        # Update the cache. No need to delete and recreate
         if link_id in link_cache:
-            link_cache[link_id]['downloads'] = updated_file_data.get("downloads", 0) #Safe retrieval
+            link_cache[link_id]['downloads'] = updated_file_data.get("downloads", 0)
 
-    text, keyboard = create_download_link_message(updated_file_data, link_id)  #Use updated data.
+    text, keyboard = create_download_link_message(updated_file_data, link_id)
     send_request("sendDocument", {"chat_id": chat_id, "document": file_data["file_id"], "reply_markup": keyboard})
-    if chat_id in PASSWORD_REQUEST_STATES: del PASSWORD_REQUEST_STATES[chat_id]  # Added del here.
+    if chat_id in PASSWORD_REQUEST_STATES: del PASSWORD_REQUEST_STATES[chat_id]
 
 
 # --- Text Handling ---
@@ -305,7 +299,6 @@ def handle_text_upload(chat_id, text_message):
     text_data = {"text_id": text_id, "text": text_message, "created_at": datetime.now()}
     try:
         texts_collection.insert_one(text_data)
-        # Cache and create a copy.
         text_data_for_cache = text_data.copy()
         del text_data_for_cache["_id"]
         text_cache[text_id] = text_data_for_cache
@@ -321,8 +314,8 @@ def handle_text_upload(chat_id, text_message):
 def get_text_data(text_id):
     """Retrieves text data (cached or from DB). Returns a *copy* of cached data."""
     if text_id in text_cache:
-        return text_cache[text_id].copy()  # Return a COPY
-    text_data = texts_collection.find_one({"text_id": text_id}, {"_id": 0, "text_id": 1, "text": 1})  # Projection
+        return text_cache[text_id].copy()
+    text_data = texts_collection.find_one({"text_id": text_id}, {"_id": 0, "text_id": 1, "text": 1})
     if text_data:
         text_cache[text_id] = text_data
         return text_data
@@ -343,7 +336,7 @@ def send_stored_text(chat_id, text_id):
 def broadcast_message(message_type, content):
     """Broadcasts a message."""
     sent_count = 0
-    for user in users_collection.find({}, {"_id": 0, "chat_id": 1}):  # Projection
+    for user in users_collection.find({}, {"_id": 0, "chat_id": 1}):
         chat_id = user["chat_id"]
         if message_type == "text":
             result = send_request("sendMessage", {"chat_id": chat_id, "text": content, "parse_mode": "Markdown"})
@@ -359,12 +352,12 @@ def handle_callback(query):
     chat_id = query["message"]["chat"]["id"]
     data = query["data"]
     user_id = query["from"]["id"]
-    send_request("answerCallbackQuery", {"callback_query_id": query["id"]})  # Acknowledge immediately
+    send_request("answerCallbackQuery", {"callback_query_id": query["id"]})
 
     if data.startswith("like_"):
         _handle_like(query)
     elif data.startswith("download_"):
-        return  # No action needed
+        return
     elif data == "upload_file":
         _handle_upload_file(chat_id)
     elif data == "password_yes":
@@ -380,7 +373,7 @@ def handle_callback(query):
     elif data == "back_to_panel":
         _handle_back_to_panel(chat_id)
     elif data.startswith("get_referral_"):
-        _handle_get_referral(chat_id, user_id) # Now calls a dedicated function
+        _handle_get_referral(chat_id, user_id)
     elif data == "referral_stats":
         _handle_referral_stats(chat_id, user_id, query)
 
@@ -392,34 +385,30 @@ def _handle_like(query):
     user_id = query["from"]["id"]
     link_id = data.split("_")[1]
 
-    file_data = get_file_data(link_id)  # Use the cached/DB function
+    file_data = get_file_data(link_id)
     if not file_data:
         return
 
-    # Use find_one_and_update for atomic like update/insert.
     try:
         if likes_collection.find_one_and_update(
                 {"user_id": user_id, "link_id": link_id},
                 {"$set": {"timestamp": datetime.now()}},
                 upsert=True
-        ) is None:  # Check if it was an insert (new like)
-            # Increment likes atomically and get updated document
+        ) is None:
             updated_file_data = files_collection.find_one_and_update(
                 {"link_id": link_id},
                 {"$inc": {"likes": 1}},
                 return_document=True
             )
 
-            # Update cache
             if link_id in link_cache:
-                link_cache[link_id]['likes'] = updated_file_data.get("likes",0)  # Safe retrieval
+                link_cache[link_id]['likes'] = updated_file_data.get("likes",0)
 
-            text, keyboard = create_download_link_message(updated_file_data, link_id) # Use updated data
+            text, keyboard = create_download_link_message(updated_file_data, link_id)
             send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
 
     except errors.PyMongoError as e:
         logger.error(f"MongoDB error during like operation: {e}")
-        #  Could send a message to the user, but it's likely a transient error.
 
 def _handle_upload_file(chat_id):
     UPLOAD_STATES[chat_id] = {"waiting_for_password": True, "password": None}
@@ -488,7 +477,7 @@ def _handle_get_referral(chat_id, user_id):
 def _get_user_data(chat_id):
     """Gets user data (cached or from DB). Returns a *copy* of cached data."""
     if chat_id in user_cache:
-        return user_cache[chat_id].copy()  # Return a COPY
+        return user_cache[chat_id].copy()
 
     user_data = users_collection.find_one({"chat_id": chat_id},
                                          {"_id": 0, "chat_id": 1, "username": 1, "first_name": 1})
@@ -504,11 +493,9 @@ def _update_user_data(chat_id, username, first_name):
         users_collection.update_one({"chat_id": chat_id},
                                     {"$set": {"username": username, "first_name": first_name,
                                               "last_active": datetime.now()}}, upsert=True)
-        # Update cache
         user_cache[chat_id] = {"chat_id": chat_id, "username": username, "first_name": first_name}
     except errors.PyMongoError as e:
         logger.error(f"MongoDB error updating user data: {e}")
-        #  Consider sending an error message to the user.
 
 
 # --- Update Handling ---
@@ -519,7 +506,7 @@ def handle_updates(updates):
         if "message" in update:
             _handle_message(update["message"])
         elif "callback_query" in update:
-            handle_callback(update["callback_query"])  # handle_callback is already optimized
+            handle_callback(update["callback_query"])
 
 
 def _handle_message(msg):
@@ -537,12 +524,12 @@ def _handle_message(msg):
             _handle_cancel(chat_id)
         elif text == "/start":
             _handle_start(chat_id, first_name)
-        elif text == "/event": # handle /event command
-            send_referral_link(chat_id, user_id)
+        elif text == "/event":
+            send_referral_link_request(chat_id, user_id)  # Corrected function call
         elif text == "پنل" and username in WHITELIST:
             send_panel(chat_id)
         elif text.startswith("/start "):
-            _handle_start_link(chat_id, text, user_id)  # Pass user_id
+            _handle_start_link(chat_id, text, user_id)
         elif chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_text" and username in WHITELIST:
             _handle_broadcast_input(chat_id, text)
         elif chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password_input"):
@@ -583,11 +570,10 @@ def _handle_start_link(chat_id, text, referred_id):
     """Handles /start commands with a link ID, including referral links."""
     link_id = text.split(" ", 1)[1]
 
-    if link_id.isdigit():  # It's a referral link
+    if link_id.isdigit():
         referrer_id = int(link_id)
         record_referral(referrer_id, referred_id)
-        # Send a welcome message.
-        _handle_start(chat_id, _get_user_data(chat_id).get("first_name", "")) # Get user data for first name
+        _handle_start(chat_id, _get_user_data(chat_id).get("first_name", ""))
 
     elif link_id.startswith("t"):
         send_stored_text(chat_id, link_id)
@@ -624,8 +610,8 @@ def _handle_text_input(chat_id, text):
 
 def _handle_document_input(chat_id, msg):
     file_id = msg["document"]["file_id"]
-    file_name = msg["document"].get("file_name", "unnamed_file")  # Provide a default
-    password = UPLOAD_STATES[chat_id].get("password")  # Safely get password
+    file_name = msg["document"].get("file_name", "unnamed_file")
+    password = UPLOAD_STATES[chat_id].get("password")
     handle_file_upload(chat_id, file_id, file_name, password)
     del UPLOAD_STATES[chat_id]
 
@@ -640,7 +626,7 @@ def start_bot():
         try:
             updates = send_request("getUpdates", {"offset": offset, "timeout": 180, "limit": 100})
             if updates and updates.get("result"):
-                handle_updates(updates["result"])  # Now calls the optimized function
+                handle_updates(updates["result"])
                 offset = updates["result"][-1]["update_id"] + 1
             elif not updates or not updates.get("ok"):
                 logger.warning(f"getUpdates returned an unexpected result: {updates}")
@@ -649,8 +635,8 @@ def start_bot():
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
-            logger.exception(e)  # Log the full traceback
-            time.sleep(5)  # Wait before retrying
+            logger.exception(e)
+            time.sleep(5)
 
 
 if __name__ == "__main__":
