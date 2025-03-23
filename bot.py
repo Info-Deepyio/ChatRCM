@@ -8,15 +8,15 @@ import pytz
 import time
 from pymongo import MongoClient, errors
 
-# Configure logging (more selective)
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Configurations
-TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"  # Replace
-MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
+TOKEN = "YOUR_BALE_BOT_TOKEN"  # Replace
+MONGO_URI = "YOUR_MONGO_URI"  # Replace
 DB_NAME = "uploader_bot"
-WHITELIST = ["zonercm", "id_hormoz"]
+WHITELIST = ["zonercm", "id_hormoz"]  # Replace with your whitelisted usernames
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
 
 # State tracking
@@ -34,7 +34,6 @@ users_collection = db["users"]
 texts_collection = db["texts"]
 referrals_collection = db["referrals"]
 
-
 # Indexes
 files_collection.create_index("link_id")
 likes_collection.create_index([("user_id", 1), ("link_id", 1)], unique=True)
@@ -42,7 +41,6 @@ users_collection.create_index("chat_id", unique=True)
 texts_collection.create_index("text_id")
 referrals_collection.create_index([("referrer_id", 1), ("referred_id", 1)], unique=True)
 referrals_collection.create_index("referrer_id")
-
 
 # Telegram API URL
 API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
@@ -53,33 +51,23 @@ text_cache = {}
 user_cache = {}
 session = requests.Session()
 
-
 def send_request(method, data):
-    """Sends a request to the Bale API and handles potential token expiration."""
+    """Sends a request to the Bale API."""
     url = API_URL + method
     try:
         response = session.post(url, json=data, timeout=10)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 401:
-            logger.error(f"API request error: 401 Unauthorized.  Possible token expiration. Method: {method}, Data: {data}")
-            return {"ok": False, "error": "401 Unauthorized"}
-        else:
-            logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
-            return {"ok": False, "error": str(e)}
     except requests.exceptions.RequestException as e:
         logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
         return {"ok": False, "error": str(e)}
     except ValueError as e:
-        logger.error(f"JSON decode error: {e}, Response: {response.text}")
+        logger.error(f"JSON decode error: {e}")
         return {"ok": False, "error": str(e)}
-
 
 def generate_link(prefix=""):
     """Generates a random link ID."""
     return prefix + ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-
 
 def get_persian_datetime():
     """Gets the current Persian date and time."""
@@ -87,11 +75,9 @@ def get_persian_datetime():
     jdatetime_now = jdatetime.datetime.fromgregorian(datetime=now_tehran)
     return convert_to_persian_numerals(jdatetime_now.strftime("%Y/%m/%d - %H:%M"))
 
-
 def convert_to_persian_numerals(text):
     """Converts English numerals to Persian."""
     return text.translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))
-
 
 # --- UI Functions ---
 
@@ -113,44 +99,34 @@ def send_panel(chat_id):
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
-
 def send_broadcast_menu(chat_id):
-    """Sends the broadcast menu."""
     keyboard = {
         "inline_keyboard": [
             [{"text": "📝 متن", "callback_data": "broadcast_text"}],
             [{"text": "🔙 بازگشت", "callback_data": "back_to_panel"}]
         ]
     }
-    send_request("sendMessage", {"chat_id": chat_id, "text": "📢 مدیریت ارسال پیام\n\nنوع پیام را انتخاب کنید:",
-                 "reply_markup": keyboard})
-
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📢 مدیریت ارسال پیام\n\nنوع پیام را انتخاب کنید:", "reply_markup": keyboard})
 
 def ask_for_password(chat_id):
-    """Asks if the file needs a password."""
     keyboard = {
         "inline_keyboard": [
-            [{"text": "✅ بله", "callback_data": "password_yes"},
-             {"text": "❌ خیر", "callback_data": "password_no"}]
+            [{"text": "✅ بله", "callback_data": "password_yes"}, {"text": "❌ خیر", "callback_data": "password_no"}]
         ]
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 آیا فایل نیاز به رمز دارد؟", "reply_markup": keyboard})
 
-
 def create_download_link_message(file_data, link_id):
-    """Creates a download link message. Handles potential missing keys safely."""
     start_link = f"/start {link_id}"
     text = f"✅ فایل ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
     if file_data.get('password'):
         text += f"\n🔑 رمز: \n```{file_data['password']}```"
-
     likes_count = convert_to_persian_numerals(str(file_data.get('likes', 0)))
     downloads_count = convert_to_persian_numerals(str(file_data.get('downloads', 0)))
-
     keyboard = {
         "inline_keyboard": [
-            [{"text": f"❤️ تعداد لایک: {likes_count}", "callback_data": f"like_{link_id}"}],
-            [{"text": f"📥 تعداد دانلود: {downloads_count}", "callback_data": f"download_{link_id}"}],
+            [{"text": f"❤️ {likes_count}", "callback_data": f"like_{link_id}"}],
+            [{"text": f"📥 {downloads_count}", "callback_data": f"download_{link_id}"}],
         ]
     }
     return text, keyboard
@@ -158,7 +134,6 @@ def create_download_link_message(file_data, link_id):
 # --- Referral System Functions ---
 
 def send_referral_link_request(chat_id, user_id):
-    """Sends the initial referral link request with an inline keyboard."""
     text = "برای دریافت لینک نشر خود، روی دکمه زیر کلیک کنید:"
     keyboard = {
         "inline_keyboard": [
@@ -168,14 +143,12 @@ def send_referral_link_request(chat_id, user_id):
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
 def send_actual_referral_link(chat_id, user_id):
-    """Sends the actual referral link after the button is pressed."""
     referral_link = f"ble.ir/uploadd_bot?start={user_id}"
-    text = f"🔗 لینک اختصاصی شما:\n\n{referral_link}"  # No Markdown formatting here
+    text = f"🔗 لینک اختصاصی شما:\n\n{referral_link}"
     send_request("sendMessage", {"chat_id": chat_id, "text": text})
 
-
 def get_referral_stats():
-    """Gets and formats referral statistics with username and first_name."""
+    """Gets and formats referral statistics with enhanced formatting."""
     pipeline = [
         {"$group": {"_id": "$referrer_id", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
@@ -199,19 +172,27 @@ def get_referral_stats():
     if not stats:
         return "❌ هیچ آماری از نشر کاربران وجود ندارد."
 
-    message_text = "📊 آمار نشر کاربران:\n\n"
+    # Build the formatted message
+    message_text = "📊 **آمار نشر کاربران** 📊\n\n"  # Bold header
+    message_text += "➖➖➖➖➖➖➖➖➖➖\n"  # Separator line
+
     for stat in stats:
         username = stat.get('username', 'نامشخص')
         first_name = stat.get('first_name', 'نامشخص')
-        message_text += (f"👤 کاربر: {first_name} ({username}) (ID: {stat['chat_id']}) - "
-                         f"تعداد نشر: {convert_to_persian_numerals(str(stat['count']))}\n")
+        count = convert_to_persian_numerals(str(stat['count']))
+
+        # Create a formatted row for each user
+        message_text += f"👤 **نام:** {first_name}\n"  # Bold name
+        message_text += f"🆔 **آیدی:** `{stat['chat_id']}`\n"  # Monospaced ID
+        message_text += f"🌐 **نام کاربری:** @{username}\n" if username else f"🌐 **نام کاربری:** ندارد\n" #username
+        message_text += f"📈 **تعداد نشر:** {count}\n"  # Referral count
+        message_text += "➖➖➖➖➖➖➖➖➖➖\n"  # Separator line
+
     return message_text
 
-
 def record_referral(referrer_id, referred_id):
-    """Records a referral in the database."""
     if referrer_id == referred_id:
-        return  # Prevent self-referral
+        return
     try:
         referrals_collection.insert_one({"referrer_id": referrer_id, "referred_id": referred_id, "timestamp": datetime.now()})
         logger.info(f"Referral recorded: {referrer_id} referred {referred_id}")
@@ -221,7 +202,7 @@ def record_referral(referrer_id, referred_id):
         logger.error(f"MongoDB error recording referral: {e}")
 
 # --- File Handling ---
-
+# (rest of file/text handling functions remain unchanged)
 def handle_file_upload(chat_id, file_id, file_name, password=None):
     """Handles file upload, inserts into DB, and updates the cache."""
     link_id = generate_link()
@@ -344,9 +325,8 @@ def broadcast_message(message_type, content):
             sent_count += 1
     return sent_count
 
-
 # --- Callback Handling ---
-
+# (callback handlers remain unchanged)
 def handle_callback(query):
     """Handles callback queries."""
     chat_id = query["message"]["chat"]["id"]
@@ -499,7 +479,7 @@ def _update_user_data(chat_id, username, first_name):
 
 
 # --- Update Handling ---
-
+# (update handlers remain unchanged)
 def handle_updates(updates):
     """Processes updates."""
     for update in updates:
@@ -525,7 +505,7 @@ def _handle_message(msg):
         elif text == "/start":
             _handle_start(chat_id, first_name)
         elif text == "/event":
-            send_referral_link_request(chat_id, user_id)  # Corrected function call
+            send_referral_link_request(chat_id, user_id)
         elif text == "پنل" and username in WHITELIST:
             send_panel(chat_id)
         elif text.startswith("/start "):
@@ -615,9 +595,8 @@ def _handle_document_input(chat_id, msg):
     handle_file_upload(chat_id, file_id, file_name, password)
     del UPLOAD_STATES[chat_id]
 
-
 # --- Main Loop ---
-
+# (main loop remains unchanged)
 def start_bot():
     """Starts the bot."""
     offset = 0
@@ -635,9 +614,8 @@ def start_bot():
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
-            logger.exception(e)
+            logger.exception(e)  # Log the full traceback
             time.sleep(5)
-
 
 if __name__ == "__main__":
     start_bot()
