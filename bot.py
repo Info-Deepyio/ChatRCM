@@ -160,36 +160,39 @@ def create_download_link_message(file_data, link_id):
 # --- Referral System Functions ---
 
 def send_referral_link(chat_id, user_id):
-    """Sends the referral link to the user."""
-    referral_link = f"ble.ir/uploadd_bot?start={user_id}"  # Corrected URL
-    text = (
-        "برای دریافت لینک نشر خود از دکمه زیر استفاده کنید:\n\n"
-        f"🔗 لینک نظر شما:\n```\n{referral_link}\n```"
-    )
+    """Sends the referral link request to the user."""
+    text = "برای دریافت لینک نشر خود از دکمه زیر استفاده کنید:"
     keyboard = {
         "inline_keyboard" : [
             [{"text": "🔗 دریافت لینک", "callback_data": f"get_referral_{user_id}"}]
         ]
     }
+    send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
-    send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
+def send_actual_referral_link(chat_id, user_id):
+    """Sends the actual referral link after the button is pressed."""
+    referral_link = f"ble.ir/uploadd_bot?start={user_id}"
+    text = f"🔗 لینک نظر شما:\n```\n{referral_link}\n```"
+    send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
+
 
 def get_referral_stats():
-    """Gets and formats referral statistics."""
+    """Gets and formats referral statistics with username and first_name."""
     pipeline = [
         {"$group": {"_id": "$referrer_id", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},  # Sort by referral count (descending)
-        {"$lookup": { # Join with users collection
+        {"$sort": {"count": -1}},
+        {"$lookup": {
             "from": "users",
             "localField": "_id",
             "foreignField": "chat_id",
             "as": "user_info"
         }},
-        {"$unwind": "$user_info"}, # Deconstruct the user_info array
-        {"$project": { # Select fields to display
+        {"$unwind": "$user_info"},
+        {"$project": {
             "_id": 0,
             "chat_id": "$_id",
             "username": "$user_info.username",
+            "first_name": "$user_info.first_name",  # Include first_name
             "count": 1
         }}
     ]
@@ -200,8 +203,10 @@ def get_referral_stats():
 
     message_text = "📊 آمار نشر کاربران:\n\n"
     for stat in stats:
-        username = stat.get('username', 'نامشخص')  # Handle missing usernames
-        message_text += f"👤 کاربر: {username} (ID: {stat['chat_id']}) - تعداد نشر: {convert_to_persian_numerals(str(stat['count']))}\n"
+        username = stat.get('username', 'نامشخص')
+        first_name = stat.get('first_name', 'نامشخص') # Get first name.
+        message_text += (f"👤 کاربر: {first_name} ({username}) (ID: {stat['chat_id']}) - "
+                         f"تعداد نشر: {convert_to_persian_numerals(str(stat['count']))}\n")
     return message_text
 
 
@@ -375,8 +380,7 @@ def handle_callback(query):
     elif data == "back_to_panel":
         _handle_back_to_panel(chat_id)
     elif data.startswith("get_referral_"):
-        # No action needed besides acknowledging the button press
-        pass
+        _handle_get_referral(chat_id, user_id) # Now calls a dedicated function
     elif data == "referral_stats":
         _handle_referral_stats(chat_id, user_id, query)
 
@@ -474,6 +478,10 @@ def _handle_referral_stats(chat_id, user_id, query):
     else:
       send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
+
+def _handle_get_referral(chat_id, user_id):
+    """Handles the referral link request."""
+    send_actual_referral_link(chat_id, user_id)
 
 # --- User Handling ---
 
