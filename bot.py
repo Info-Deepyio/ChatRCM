@@ -5,7 +5,7 @@ import jdatetime
 from datetime import datetime
 import logging
 import pytz
-import time  # Import the time module
+import time
 from pymongo import MongoClient, errors
 
 # Configure logging (more selective)
@@ -32,12 +32,17 @@ files_collection = db["files"]
 likes_collection = db["likes"]
 users_collection = db["users"]
 texts_collection = db["texts"]
+referrals_collection = db["referrals"]  # New collection for referrals
+
 
 # Indexes
 files_collection.create_index("link_id")
 likes_collection.create_index([("user_id", 1), ("link_id", 1)], unique=True)
 users_collection.create_index("chat_id", unique=True)
 texts_collection.create_index("text_id")
+referrals_collection.create_index([("referrer_id", 1), ("referred_id", 1)], unique=True) # Prevent duplicate referrals
+referrals_collection.create_index("referrer_id")  # Index for faster querying
+
 
 # Telegram API URL
 API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
@@ -103,7 +108,8 @@ def send_panel(chat_id):
         "inline_keyboard": [
             [{"text": "📤 آپلود فایل", "callback_data": "upload_file"}],
             [{"text": "📝 آپلود متن", "callback_data": "upload_text"}],
-            [{"text": "📢 ارسال پیام", "callback_data": "broadcast_menu"}]
+            [{"text": "📢 ارسال پیام", "callback_data": "broadcast_menu"}],
+            [{"text": "📊 تعداد نشر کاربران", "callback_data": "referral_stats"}] # Added referral stats button
         ]
     }
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
@@ -151,6 +157,66 @@ def create_download_link_message(file_data, link_id):
     }
     return text, keyboard
 
+# --- Referral System Functions ---
+
+def send_referral_link(chat_id, user_id):
+    """Sends the referral link to the user."""
+    referral_link = f"ble.ir/uploadd_bot?start={user_id}"  # Corrected URL
+    text = (
+        "برای دریافت لینک نشر خود از دکمه زیر استفاده کنید:\n\n"
+        f"🔗 لینک نظر شما:\n```\n{referral_link}\n```"
+    )
+    keyboard = {
+        "inline_keyboard" : [
+            [{"text": "🔗 دریافت لینک", "callback_data": f"get_referral_{user_id}"}]
+        ]
+    }
+
+    send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
+
+def get_referral_stats():
+    """Gets and formats referral statistics."""
+    pipeline = [
+        {"$group": {"_id": "$referrer_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},  # Sort by referral count (descending)
+        {"$lookup": { # Join with users collection
+            "from": "users",
+            "localField": "_id",
+            "foreignField": "chat_id",
+            "as": "user_info"
+        }},
+        {"$unwind": "$user_info"}, # Deconstruct the user_info array
+        {"$project": { # Select fields to display
+            "_id": 0,
+            "chat_id": "$_id",
+            "username": "$user_info.username",
+            "count": 1
+        }}
+    ]
+    stats = list(referrals_collection.aggregate(pipeline))
+
+    if not stats:
+        return "❌ هیچ آماری از نشر کاربران وجود ندارد."
+
+    message_text = "📊 آمار نشر کاربران:\n\n"
+    for stat in stats:
+        username = stat.get('username', 'نامشخص')  # Handle missing usernames
+        message_text += f"👤 کاربر: {username} (ID: {stat['chat_id']}) - تعداد نشر: {convert_to_persian_numerals(str(stat['count']))}\n"
+    return message_text
+
+
+def record_referral(referrer_id, referred_id):
+    """Records a referral in the database."""
+    if referrer_id == referred_id:
+        return  # Prevent self-referral
+    try:
+        referrals_collection.insert_one({"referrer_id": referrer_id, "referred_id": referred_id, "timestamp": datetime.now()})
+        logger.info(f"Referral recorded: {referrer_id} referred {referred_id}")
+    except errors.DuplicateKeyError:
+        logger.info(f"Duplicate referral attempt: {referrer_id} referred {referred_id}")  # Log but don't raise
+    except errors.PyMongoError as e:
+        logger.error(f"MongoDB error recording referral: {e}")
+        # Consider sending a message to the user.
 
 # --- File Handling ---
 
@@ -287,6 +353,7 @@ def handle_callback(query):
     """Handles callback queries."""
     chat_id = query["message"]["chat"]["id"]
     data = query["data"]
+    user_id = query["from"]["id"]
     send_request("answerCallbackQuery", {"callback_query_id": query["id"]})  # Acknowledge immediately
 
     if data.startswith("like_"):
@@ -307,7 +374,11 @@ def handle_callback(query):
         _handle_broadcast_text(query)
     elif data == "back_to_panel":
         _handle_back_to_panel(chat_id)
-
+    elif data.startswith("get_referral_"):
+        # No action needed besides acknowledging the button press
+        pass
+    elif data == "referral_stats":
+        _handle_referral_stats(chat_id, user_id, query)
 
 def _handle_like(query):
     """Handles the like button press. Uses atomic updates."""
@@ -395,6 +466,15 @@ def _handle_back_to_panel(chat_id):
     send_panel(chat_id)
 
 
+def _handle_referral_stats(chat_id, user_id, query):
+    username = query["from"].get("username", "")
+    if username in WHITELIST:
+        stats_message = get_referral_stats()
+        send_request("sendMessage", {"chat_id": chat_id, "text": stats_message, "parse_mode": "Markdown"})
+    else:
+      send_request("answerCallbackQuery",
+                     {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
+
 # --- User Handling ---
 
 def _get_user_data(chat_id):
@@ -439,6 +519,7 @@ def _handle_message(msg):
     chat_id = msg["chat"]["id"]
     username = msg["from"].get("username", "")
     first_name = msg["from"].get("first_name", "")
+    user_id = msg["from"]["id"]
 
     _update_user_data(chat_id, username, first_name)
 
@@ -448,10 +529,12 @@ def _handle_message(msg):
             _handle_cancel(chat_id)
         elif text == "/start":
             _handle_start(chat_id, first_name)
+        elif text == "/event": # handle /event command
+            send_referral_link(chat_id, user_id)
         elif text == "پنل" and username in WHITELIST:
             send_panel(chat_id)
         elif text.startswith("/start "):
-            _handle_start_link(chat_id, text)
+            _handle_start_link(chat_id, text, user_id)  # Pass user_id
         elif chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_text" and username in WHITELIST:
             _handle_broadcast_input(chat_id, text)
         elif chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password_input"):
@@ -488,10 +571,17 @@ def _handle_start(chat_id, first_name):
     send_request("sendMessage", {"chat_id": chat_id, "text": greet_text, "parse_mode": "Markdown"})
 
 
-def _handle_start_link(chat_id, text):
-    """Handles /start commands with a link ID."""
+def _handle_start_link(chat_id, text, referred_id):
+    """Handles /start commands with a link ID, including referral links."""
     link_id = text.split(" ", 1)[1]
-    if link_id.startswith("t"):
+
+    if link_id.isdigit():  # It's a referral link
+        referrer_id = int(link_id)
+        record_referral(referrer_id, referred_id)
+        # Send a welcome message.
+        _handle_start(chat_id, _get_user_data(chat_id).get("first_name", "")) # Get user data for first name
+
+    elif link_id.startswith("t"):
         send_stored_text(chat_id, link_id)
     else:
         send_stored_file(chat_id, link_id)
