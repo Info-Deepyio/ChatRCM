@@ -7,11 +7,11 @@ import logging
 import pytz
 import time
 from pymongo import MongoClient, errors
-
+#gg
 TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
-WHITELIST = ["zonercm", "id_hormoz"]
+WHITELIST = ["zonercm", "id_hormoz", "dszone"]
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
 
 BROADCAST_STATES = {}
