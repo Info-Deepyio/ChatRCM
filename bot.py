@@ -7,7 +7,7 @@ import logging
 import pytz
 import time
 from pymongo import MongoClient, errors
-#
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -60,6 +60,18 @@ def send_request(method, data):
         return response.json()
     except requests.exceptions.RequestException as e:
         logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
+        # Attempt to reconnect if connection error
+        if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+             logger.info("Attempting to reconnect...")
+             time.sleep(5) # Wait a few seconds before retrying.
+             try: # Try again
+                 response = session.post(url, json=data, timeout=10)
+                 response.raise_for_status()
+                 return response.json()
+             except requests.exceptions.RequestException as e2:
+                 logger.error(f"Second API request failed: {e2}, Method: {method}")
+                 return {"ok": False, "error": str(e2)}
+
         return {"ok": False, "error": str(e)}
     except ValueError as e:
         logger.error(f"JSON decode error: {e}")
@@ -102,6 +114,7 @@ def send_panel(chat_id):
 def send_broadcast_menu(chat_id):
     keyboard = {
         "inline_keyboard": [
+            [{"text": "🖼️ تصویر", "callback_data": "broadcast_image"}],  # Added image option
             [{"text": "📝 متن", "callback_data": "broadcast_text"}],
             [{"text": "🔙 بازگشت", "callback_data": "back_to_panel"}]
         ]
@@ -314,13 +327,19 @@ def send_stored_text(chat_id, text_id):
 
 # --- Broadcasting ---
 
-def broadcast_message(message_type, content):
-    """Broadcasts a message."""
+def broadcast_message(message_type, content, file_id=None):
+    """Broadcasts a message.  Handles text and images."""
     sent_count = 0
     for user in users_collection.find({}, {"_id": 0, "chat_id": 1}):
         chat_id = user["chat_id"]
         if message_type == "text":
             result = send_request("sendMessage", {"chat_id": chat_id, "text": content, "parse_mode": "Markdown"})
+        elif message_type == "image":
+            result = send_request("sendPhoto", {"chat_id": chat_id, "photo": file_id, "caption": content})
+        else:
+            logger.error(f"Invalid message_type for broadcast: {message_type}")
+            return 0 # Don't count
+
         if result and result.get("ok"):
             sent_count += 1
     return sent_count
@@ -350,6 +369,8 @@ def handle_callback(query):
         _handle_broadcast_menu(query)
     elif data == "broadcast_text":
         _handle_broadcast_text(query)
+    elif data == "broadcast_image":  # Handle image broadcast selection
+        _handle_broadcast_image(query)
     elif data == "back_to_panel":
         _handle_back_to_panel(chat_id)
     elif data.startswith("get_referral_"):
@@ -428,6 +449,17 @@ def _handle_broadcast_text(query):
     if username in WHITELIST:
         BROADCAST_STATES[chat_id] = "waiting_for_text"
         send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن را وارد کنید:", "parse_mode": "Markdown"})
+    else:
+        send_request("answerCallbackQuery",
+                     {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
+
+def _handle_broadcast_image(query):
+    """Handles the broadcast image callback."""
+    chat_id = query["message"]["chat"]["id"]
+    username = query["from"].get("username", "")
+    if username in WHITELIST:
+        BROADCAST_STATES[chat_id] = "waiting_for_image"
+        send_request("sendMessage", {"chat_id": chat_id, "text": "🖼️ تصویر را به همراه کپشن (اختیاری) ارسال کنید."})
     else:
         send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
@@ -520,7 +552,9 @@ def _handle_message(msg):
             _handle_text_input(chat_id, text)
     elif "document" in msg and chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_file"):
         _handle_document_input(chat_id, msg)
-
+    # Handle image broadcast input
+    elif "photo" in msg and chat_id in BROADCAST_STATES and BROADCAST_STATES[chat_id] == "waiting_for_image" and username in WHITELIST:
+        _handle_image_broadcast_input(chat_id, msg)
 
 def _handle_cancel(chat_id):
     """Handles the /cancel command."""
@@ -594,6 +628,18 @@ def _handle_document_input(chat_id, msg):
     password = UPLOAD_STATES[chat_id].get("password")
     handle_file_upload(chat_id, file_id, file_name, password)
     del UPLOAD_STATES[chat_id]
+
+def _handle_image_broadcast_input(chat_id, msg):
+    """Handles input for image broadcasts."""
+    file_id = msg["photo"][-1]["file_id"]  # Get the largest size
+    caption = msg.get("caption", "")  # Caption is optional
+    del BROADCAST_STATES[chat_id]
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
+    sent_count = broadcast_message("image", caption, file_id)
+    send_request("sendMessage",
+                 {"chat_id": chat_id, "text": f"✅ به {convert_to_persian_numerals(str(sent_count))} کاربر ارسال شد."})
+
+
 
 # --- Main Loop ---
 # (main loop remains unchanged)
