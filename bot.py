@@ -13,7 +13,7 @@ MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.r
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz", "dszone"]
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
-
+#b
 BROADCAST_STATES = {}
 UPLOAD_STATES = {}
 PASSWORD_REQUEST_STATES = {}
