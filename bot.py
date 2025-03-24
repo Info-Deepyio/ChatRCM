@@ -10,7 +10,7 @@ from pymongo import MongoClient, errors, ReturnDocument
 from functools import wraps
 from collections import defaultdict
 
-TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"
+TOKEN = "1256780708:8vRy6ELTto7QJYcsGMvTLLhosxVUDaKvdX69skRL"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz", "dszone"]
