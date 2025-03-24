@@ -6,19 +6,18 @@ from datetime import datetime
 import logging
 import pytz
 import time
-from pymongo import MongoClient, errors, ReturnDocument
-from functools import wraps
-from collections import defaultdict
-
-TOKEN = "96105755:CLvNscpAWgXQG6ZoLYzH5o9j5nLPuoDbIftwNadq"
+from pymongo import MongoClient, errors
+#gg
+TOKEN = "812616487:OQuogUM9cV1czIJRgDFZFSrz6MBRhjZevDtQCqTD"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz", "dszone"]
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
-API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
-
-LAST_REQUEST_TIME = defaultdict(lambda: 0)
-REQUEST_DELAY = 0.1
+#b
+BROADCAST_STATES = {}
+UPLOAD_STATES = {}
+PASSWORD_REQUEST_STATES = {}
+TEXT_UPLOAD_STATES = {}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -38,60 +37,34 @@ texts_collection.create_index("text_id")
 referrals_collection.create_index([("referrer_id", 1), ("referred_id", 1)], unique=True)
 referrals_collection.create_index("referrer_id")
 
+API_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
+
 link_cache = {}
 text_cache = {}
 user_cache = {}
-
-BROADCAST_STATES = defaultdict(lambda: None)
-UPLOAD_STATES = defaultdict(lambda: {})
-PASSWORD_REQUEST_STATES = defaultdict(lambda: None)
-TEXT_UPLOAD_STATES = defaultdict(lambda: None)
-
 session = requests.Session()
 
-def rate_limit_and_handle_errors(func):
-    @wraps(func)
-    def wrapper(chat_id, *args, **kwargs):
-        now = time.time()
-        last_request = LAST_REQUEST_TIME[chat_id]
-        time_since_last_request = now - last_request
-
-        if time_since_last_request < REQUEST_DELAY:
-            sleep_time = REQUEST_DELAY - time_since_last_request
-            time.sleep(sleep_time)
-
-        LAST_REQUEST_TIME[chat_id] = time.time()
-
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                result = func(chat_id, *args, **kwargs)
-                if result and not result.get("ok"):
-                    if "Too Many Requests" in result.get("error", ""):
-                        delay = 2 ** attempt + random.random()
-                        time.sleep(delay)
-                        continue
-                    else:
-                        return {"ok": False, "error": result.get("error")}
-                return result
-            except requests.exceptions.RequestException as e:
-                if attempt == max_retries - 1:
-                    return {"ok": False, "error": str(e)}
-                delay = 2 ** attempt + random.random()
-                time.sleep(delay)
-
-    return wrapper
-
-@rate_limit_and_handle_errors
-def send_request(chat_id, method, data):
+def send_request(method, data):
     url = API_URL + method
     try:
-        response = session.post(url, json=data, timeout=20)
+        response = session.post(url, json=data, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {e}, Method: {method}, Data: {data}")
+        if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+            logger.info("Attempting to reconnect...")
+            time.sleep(5)
+            try:
+                response = session.post(url, json=data, timeout=10)
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e2:
+                logger.error(f"Second API request failed: {e2}, Method: {method}")
+                return {"ok": False, "error": str(e2)}
         return {"ok": False, "error": str(e)}
     except ValueError as e:
+        logger.error(f"JSON decode error: {e}")
         return {"ok": False, "error": str(e)}
 
 def generate_link(prefix=""):
@@ -105,7 +78,6 @@ def get_persian_datetime():
 def convert_to_persian_numerals(text):
     return text.translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))
 
-@rate_limit_and_handle_errors
 def send_panel(chat_id):
     text = (
         "🌟 بازگشت به پنل اصلی 🌟\n\n"
@@ -121,9 +93,8 @@ def send_panel(chat_id):
             [{"text": "📊 تعداد نشر کاربران", "callback_data": "referral_stats"}]
         ]
     }
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
+    send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
-@rate_limit_and_handle_errors
 def send_broadcast_menu(chat_id):
     keyboard = {
         "inline_keyboard": [
@@ -132,17 +103,15 @@ def send_broadcast_menu(chat_id):
             [{"text": "🔙 بازگشت", "callback_data": "back_to_panel"}]
         ]
     }
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📢 مدیریت ارسال پیام\n\nنوع پیام را انتخاب کنید:", "reply_markup": keyboard})
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📢 مدیریت ارسال پیام\n\nنوع پیام را انتخاب کنید:", "reply_markup": keyboard})
 
-@rate_limit_and_handle_errors
 def ask_for_password(chat_id):
     keyboard = {
         "inline_keyboard": [
             [{"text": "✅ بله", "callback_data": "password_yes"}, {"text": "❌ خیر", "callback_data": "password_no"}]
         ]
     }
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "🔒 آیا فایل نیاز به رمز دارد؟", "reply_markup": keyboard})
-
+    send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 آیا فایل نیاز به رمز دارد؟", "reply_markup": keyboard})
 
 def create_download_link_message(file_data, link_id):
     start_link = f"/start {link_id}"
@@ -159,7 +128,6 @@ def create_download_link_message(file_data, link_id):
     }
     return text, keyboard
 
-@rate_limit_and_handle_errors
 def send_referral_link_request(chat_id, user_id):
     text = "برای دریافت لینک نشر خود، روی دکمه زیر کلیک کنید:"
     keyboard = {
@@ -167,13 +135,12 @@ def send_referral_link_request(chat_id, user_id):
             [{"text": "🔗 دریافت لینک", "callback_data": f"get_referral_{user_id}"}]
         ]
     }
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
+    send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
-@rate_limit_and_handle_errors
 def send_actual_referral_link(chat_id, user_id):
     referral_link = f"https://ble.ir/uploadd_bot?start={user_id}"
     text = f"🔗 لینک اختصاصی شما:\n\n{referral_link}"
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": text})
+    send_request("sendMessage", {"chat_id": chat_id, "text": text})
 
 def get_referral_stats():
     pipeline = [
@@ -194,10 +161,7 @@ def get_referral_stats():
             "count": 1
         }}
     ]
-    try:
-      stats = list(referrals_collection.aggregate(pipeline))
-    except errors.PyMongoError as e:
-      return "❌ خطایی در دریافت آمار نشر کاربران رخ داد."
+    stats = list(referrals_collection.aggregate(pipeline))
 
     if not stats:
         return "❌ هیچ آماری از نشر کاربران وجود ندارد."
@@ -223,10 +187,11 @@ def record_referral(referrer_id, referred_id):
         return
     try:
         referrals_collection.insert_one({"referrer_id": referrer_id, "referred_id": referred_id, "timestamp": datetime.now()})
+        logger.info(f"Referral recorded: {referrer_id} referred {referred_id}")
     except errors.DuplicateKeyError:
-        pass
+        logger.info(f"Duplicate referral attempt: {referrer_id} referred {referred_id}")
     except errors.PyMongoError as e:
-        pass
+        logger.error(f"MongoDB error recording referral: {e}")
 
 def handle_file_upload(chat_id, file_id, file_name, password=None):
     link_id = generate_link()
@@ -245,59 +210,49 @@ def handle_file_upload(chat_id, file_id, file_name, password=None):
         del file_data_for_cache["_id"]
         link_cache[link_id] = file_data_for_cache
         text, keyboard = create_download_link_message(file_data_for_cache, link_id)
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
+        send_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard})
     except errors.PyMongoError as e:
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در ذخیره‌سازی فایل رخ داد."})
+        logger.error(f"MongoDB error during file upload: {e}")
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در ذخیره‌سازی فایل رخ داد."})
 
 def get_file_data(link_id):
     if link_id in link_cache:
         return link_cache[link_id].copy()
 
     file_data = files_collection.find_one({"link_id": link_id},
-                                        {"_id": 0, "link_id": 1, "file_id": 1, "file_name": 1, "likes": 1,
-                                        "downloads": 1, "password": 1})
+                                         {"_id": 0, "link_id": 1, "file_id": 1, "file_name": 1, "likes": 1,
+                                          "downloads": 1, "password": 1})
     if file_data:
         link_cache[link_id] = file_data
         return file_data
     return None
 
-@rate_limit_and_handle_errors
 def send_stored_file(chat_id, link_id, provided_password=None):
     file_data = get_file_data(link_id)
     if not file_data:
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
         return
 
     if file_data.get("password") and provided_password != file_data["password"]:
         if chat_id not in PASSWORD_REQUEST_STATES:
-            send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "🔒 رمز را وارد کنید یا /cancel بزنید."})
+            send_request("sendMessage", {"chat_id": chat_id, "text": "🔒 رمز را وارد کنید یا /cancel بزنید."})
             PASSWORD_REQUEST_STATES[chat_id] = link_id
             return
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ رمز اشتباه. دانلود لغو شد."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ رمز اشتباه. دانلود لغو شد."})
         if chat_id in PASSWORD_REQUEST_STATES:
-          del PASSWORD_REQUEST_STATES[chat_id]
+            del PASSWORD_REQUEST_STATES[chat_id]
         return
-
-    try:
-        updated_file_data = files_collection.find_one_and_update(
-            {"link_id": link_id},
-            {"$inc": {"downloads": 1}},
-            return_document=ReturnDocument.AFTER,
-            projection={"_id": 0, "link_id": 1, "file_id": 1, "file_name": 1, "likes": 1, "downloads": 1, "password": 1}
-        )
-    except errors.PyMongoError as e:
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در بروزرسانی فایل رخ داد."})
-        return
-
+    updated_file_data = files_collection.find_one_and_update(
+        {"link_id": link_id},
+        {"$inc": {"downloads": 1}},
+        return_document=True
+    )
     if updated_file_data:
-      if link_id in link_cache:
-        link_cache[link_id]['downloads'] = updated_file_data.get("downloads", 0)
+        if link_id in link_cache:
+            link_cache[link_id]['downloads'] = updated_file_data.get("downloads", 0)
 
-      text, keyboard = create_download_link_message(updated_file_data, link_id)
-      send_request(chat_id, "sendDocument", {"chat_id": chat_id, "document": file_data["file_id"],"reply_markup": keyboard})
-    else:
-      send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در بروزرسانی فایل رخ داد."})
-
+    text, keyboard = create_download_link_message(updated_file_data, link_id)
+    send_request("sendDocument", {"chat_id": chat_id, "document": file_data["file_id"], "reply_markup": keyboard})
     if chat_id in PASSWORD_REQUEST_STATES:
         del PASSWORD_REQUEST_STATES[chat_id]
 
@@ -312,9 +267,10 @@ def handle_text_upload(chat_id, text_message):
 
         start_link = f"/start {text_id}"
         response_text = f"✅ متن ذخیره شد!\n🔗 لینک:\n```\n{start_link}\n```"
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": response_text, "parse_mode": "Markdown"})
+        send_request("sendMessage", {"chat_id": chat_id, "text": response_text, "parse_mode": "Markdown"})
     except errors.PyMongoError as e:
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در ذخیره‌سازی متن رخ داد."})
+        logger.error(f"MongoDB error during text upload: {e}")
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ خطایی در ذخیره‌سازی متن رخ داد."})
 
 def get_text_data(text_id):
     if text_id in text_cache:
@@ -325,43 +281,34 @@ def get_text_data(text_id):
         return text_data
     return None
 
-@rate_limit_and_handle_errors
 def send_stored_text(chat_id, text_id):
     text_data = get_text_data(text_id)
     if not text_data:
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لینک نامعتبر."})
         return
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": text_data["text"]})
+    send_request("sendMessage", {"chat_id": chat_id, "text": text_data["text"]})
 
-def broadcast_message(chat_id, message_type, content, file_id=None):
+def broadcast_message(message_type, content, file_id=None):
     sent_count = 0
-    errors_count = 0
-
     for user in users_collection.find({}, {"_id": 0, "chat_id": 1}):
-        user_chat_id = user["chat_id"]
+        chat_id = user["chat_id"]
         if message_type == "text":
-            result = send_request(user_chat_id, "sendMessage", {"chat_id": user_chat_id, "text": content, "parse_mode": "Markdown"})
+            result = send_request("sendMessage", {"chat_id": chat_id, "text": content, "parse_mode": "Markdown"})
         elif message_type == "image":
-            result = send_request(user_chat_id, "sendPhoto", {"chat_id": user_chat_id, "photo": file_id, "caption": content})
+            result = send_request("sendPhoto", {"chat_id": chat_id, "photo": file_id, "caption": content})
         else:
-            return 0, 0
+            logger.error(f"Invalid message_type for broadcast: {message_type}")
+            return 0
 
         if result and result.get("ok"):
             sent_count += 1
-        else:
-            errors_count += 1
-
-    report = f"✅ به {convert_to_persian_numerals(str(sent_count))} کاربر ارسال شد."
-    if errors_count > 0:
-        report += f"\n❌ خطا در ارسال به {convert_to_persian_numerals(str(errors_count))} کاربر."
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": report})
-    return sent_count, errors_count
+    return sent_count
 
 def handle_callback(query):
     chat_id = query["message"]["chat"]["id"]
     data = query["data"]
     user_id = query["from"]["id"]
-    send_request(chat_id, "answerCallbackQuery", {"callback_query_id": query["id"]})
+    send_request("answerCallbackQuery", {"callback_query_id": query["id"]})
 
     if data.startswith("like_"):
         _handle_like(query)
@@ -388,7 +335,6 @@ def handle_callback(query):
     elif data == "referral_stats":
         _handle_referral_stats(chat_id, user_id, query)
 
-
 def _handle_like(query):
     chat_id = query["message"]["chat"]["id"]
     message_id = query["message"]["message_id"]
@@ -401,25 +347,22 @@ def _handle_like(query):
         return
 
     try:
-        likes_collection.update_one(
-            {"user_id": user_id, "link_id": link_id},
-            {"$set": {"timestamp": datetime.now()}},
-            upsert=True
-        )
-        updated_file_data = files_collection.find_one_and_update(
-            {"link_id": link_id},
-            {"$inc": {"likes": 1}},
-            return_document=ReturnDocument.AFTER,
-            projection={"_id": 0, "link_id": 1, "file_id": 1, "file_name": 1, "likes": 1, "downloads": 1, "password": 1}
-        )
-        if updated_file_data:
+        if likes_collection.find_one_and_update(
+                {"user_id": user_id, "link_id": link_id},
+                {"$set": {"timestamp": datetime.now()}},
+                upsert=True
+        ) is None:
+            updated_file_data = files_collection.find_one_and_update(
+                {"link_id": link_id},
+                {"$inc": {"likes": 1}},
+                return_document=True
+            )
             if link_id in link_cache:
-              link_cache[link_id]['likes'] = updated_file_data.get("likes", 0)
-
+                link_cache[link_id]['likes'] = updated_file_data.get("likes", 0)
             text, keyboard = create_download_link_message(updated_file_data, link_id)
-            send_request(chat_id, "editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
+            send_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": keyboard})
     except errors.PyMongoError as e:
-        pass
+        logger.error(f"MongoDB error during like operation: {e}")
 
 def _handle_upload_file(chat_id):
     UPLOAD_STATES[chat_id] = {"waiting_for_password": True, "password": None}
@@ -428,16 +371,16 @@ def _handle_upload_file(chat_id):
 def _handle_password_yes(chat_id):
     if chat_id in UPLOAD_STATES and UPLOAD_STATES[chat_id].get("waiting_for_password"):
         UPLOAD_STATES[chat_id]["waiting_for_password_input"] = True
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "🔑 رمز را وارد کنید:"})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "🔑 رمز را وارد کنید:"})
 
 def _handle_password_no(chat_id):
     if chat_id in UPLOAD_STATES:
         UPLOAD_STATES[chat_id] = {"waiting_for_file": True, "password": None}
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
 
 def _handle_upload_text(chat_id):
     TEXT_UPLOAD_STATES[chat_id] = "waiting_for_text"
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📝 متن خود را برای آپلود وارد کنید:"})
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن خود را برای آپلود وارد کنید:"})
 
 def _handle_broadcast_menu(query):
     chat_id = query["message"]["chat"]["id"]
@@ -445,7 +388,7 @@ def _handle_broadcast_menu(query):
     if username in WHITELIST:
         send_broadcast_menu(chat_id)
     else:
-        send_request(chat_id, "answerCallbackQuery",
+        send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
 
 def _handle_broadcast_text(query):
@@ -453,9 +396,9 @@ def _handle_broadcast_text(query):
     username = query["from"].get("username", "")
     if username in WHITELIST:
         BROADCAST_STATES[chat_id] = "waiting_for_text"
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📝 متن را وارد کنید:", "parse_mode": "Markdown"})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "📝 متن را وارد کنید:", "parse_mode": "Markdown"})
     else:
-        send_request(chat_id, "answerCallbackQuery",
+        send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
 
 def _handle_broadcast_image(query):
@@ -463,23 +406,23 @@ def _handle_broadcast_image(query):
     username = query["from"].get("username", "")
     if username in WHITELIST:
         BROADCAST_STATES[chat_id] = "waiting_for_image"
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "🖼️ تصویر را به همراه کپشن (اختیاری) ارسال کنید."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "🖼️ تصویر را به همراه کپشن (اختیاری) ارسال کنید."})
     else:
-        send_request(chat_id, "answerCallbackQuery",
+        send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
 
 def _handle_back_to_panel(chat_id):
     if chat_id in BROADCAST_STATES:
-        del BROADCAST_STATES[chat_id]
+        del (BROADCAST_STATES[chat_id])
     send_panel(chat_id)
 
 def _handle_referral_stats(chat_id, user_id, query):
     username = query["from"].get("username", "")
     if username in WHITELIST:
         stats_message = get_referral_stats()
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": stats_message, "parse_mode": "Markdown"})
+        send_request("sendMessage", {"chat_id": chat_id, "text": stats_message, "parse_mode": "Markdown"})
     else:
-      send_request(chat_id, "answerCallbackQuery",
+      send_request("answerCallbackQuery",
                      {"callback_query_id": query["id"], "text": "دسترسی ندارید!", "show_alert": True})
 
 def _handle_get_referral(chat_id, user_id):
@@ -488,7 +431,6 @@ def _handle_get_referral(chat_id, user_id):
 def _get_user_data(chat_id):
     if chat_id in user_cache:
         return user_cache[chat_id].copy()
-
     user_data = users_collection.find_one({"chat_id": chat_id},
                                          {"_id": 0, "chat_id": 1, "username": 1, "first_name": 1})
     if user_data:
@@ -502,9 +444,8 @@ def _update_user_data(chat_id, username, first_name):
                                     {"$set": {"username": username, "first_name": first_name,
                                               "last_active": datetime.now()}}, upsert=True)
         user_cache[chat_id] = {"chat_id": chat_id, "username": username, "first_name": first_name}
-
     except errors.PyMongoError as e:
-        pass
+        logger.error(f"MongoDB error updating user data: {e}")
 
 def handle_updates(updates):
     for update in updates:
@@ -530,7 +471,7 @@ def _handle_message(msg):
         elif text == "/event":
             send_referral_link_request(chat_id, user_id)
         elif text == "/stats":
-            _handle_user_stats(chat_id, user_id)
+            _handle_user_stats(chat_id, user_id)  # User stats
         elif text == "پنل" and username in WHITELIST:
             send_panel(chat_id)
         elif text.startswith("/start "):
@@ -557,16 +498,16 @@ def _handle_cancel(chat_id):
         del PASSWORD_REQUEST_STATES[chat_id]
     elif chat_id in TEXT_UPLOAD_STATES:
         del TEXT_UPLOAD_STATES[chat_id]
-        send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ آپلود متن لغو شد."})
+        send_request("sendMessage", {"chat_id": chat_id, "text": "❌ آپلود متن لغو شد."})
         return
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "❌ لغو شد."})
+    send_request("sendMessage", {"chat_id": chat_id, "text": "❌ لغو شد."})
 
 def _handle_start(chat_id, first_name):
     greet_text = (
         f"👋 سلام {first_name} عزیز، خوش آمدید!\n\n"
         f"📅 تاریخ و ساعت: {get_persian_datetime()}"
     )
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": greet_text, "parse_mode": "Markdown"})
+    send_request("sendMessage", {"chat_id": chat_id, "text": greet_text, "parse_mode": "Markdown"})
 
 def _handle_start_link(chat_id, text, referred_id):
     link_id = text.split(" ", 1)[1]
@@ -582,16 +523,17 @@ def _handle_start_link(chat_id, text, referred_id):
 
 def _handle_broadcast_input(chat_id, text):
     del BROADCAST_STATES[chat_id]
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
-    broadcast_message(chat_id, "text", text)
-
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
+    sent_count = broadcast_message("text", text)
+    send_request("sendMessage",
+                 {"chat_id": chat_id, "text": f"✅ به {convert_to_persian_numerals(str(sent_count))} کاربر ارسال شد."})
 
 def _handle_password_input(chat_id, text):
     password = text
     UPLOAD_STATES[chat_id]["password"] = password
     del UPLOAD_STATES[chat_id]["waiting_for_password_input"]
     UPLOAD_STATES[chat_id]["waiting_for_file"] = True
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📤 فایل را بفرستید."})
 
 def _handle_password_request(chat_id, text):
     link_id = PASSWORD_REQUEST_STATES[chat_id]
@@ -612,10 +554,13 @@ def _handle_image_broadcast_input(chat_id, msg):
     file_id = msg["photo"][-1]["file_id"]
     caption = msg.get("caption", "")
     del BROADCAST_STATES[chat_id]
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
-    broadcast_message(chat_id, "image", caption, file_id)
+    send_request("sendMessage", {"chat_id": chat_id, "text": "📤 در حال ارسال...", "parse_mode": "Markdown"})
+    sent_count = broadcast_message("image", caption, file_id)
+    send_request("sendMessage",
+                 {"chat_id": chat_id, "text": f"✅ به {convert_to_persian_numerals(str(sent_count))} کاربر ارسال شد."})
 
 def _handle_user_stats(chat_id, user_id):
+    """Handles /stats command for regular users, showing referral count."""
     user_data = _get_user_data(chat_id)
     if not user_data:
         return
@@ -626,20 +571,22 @@ def _handle_user_stats(chat_id, user_id):
 
     message_text = f"👤 **{first_name}** عزیز\n\n"
     message_text += f"📈 شما {referral_count_persian} نفر را به ربات دعوت کرده‌اید."
-    send_request(chat_id, "sendMessage", {"chat_id": chat_id, "text": message_text, "parse_mode": "Markdown"})
+    send_request("sendMessage", {"chat_id": chat_id, "text": message_text, "parse_mode": "Markdown"})
 
 def start_bot():
     offset = 0
     logger.info("Bot started")
     while True:
         try:
-            updates = send_request(None, "getUpdates", {"offset": offset, "timeout": 180, "limit": 100}) # Pass None for chat_id since it is not a per-chat request
+            updates = send_request("getUpdates", {"offset": offset, "timeout": 180, "limit": 100})
             if updates and updates.get("result"):
                 handle_updates(updates["result"])
                 offset = updates["result"][-1]["update_id"] + 1
             elif not updates or not updates.get("ok"):
+                logger.warning(f"getUpdates returned an unexpected result: {updates}")
                 time.sleep(5)
         except Exception as e:
+            logger.error(f"Error in main loop: {e}")
             logger.exception(e)
             time.sleep(5)
 
