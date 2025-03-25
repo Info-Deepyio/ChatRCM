@@ -9,7 +9,7 @@ import time
 from pymongo import MongoClient, errors
 #gg
 TOKEN = "1160037511:4wCrt1VNO1y11yDEs5PQtl3bWKIBhDu2mslTkCo7"
-MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
+MONGO_URI = "mongodb://mongo:LdQvOFTnDVjPCDGqCzHNSsPUyqUZBkPq@tramway.proxy.rlwy.net:27166"
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz", "dszone"]
 TEHRAN_TIMEZONE = pytz.timezone('Asia/Tehran')
