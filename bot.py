@@ -8,7 +8,7 @@ import pytz
 import time
 from pymongo import MongoClient, errors
 #gg
-TOKEN = "812616487:RPZac25s6Lsq5YO9jonoVahcyOnWWbYmwtBxIxCp"
+TOKEN = "812616487:IjVL5mlUMDjkqJbfKiW3vMlAgbfnwAaZzigzKWMJ"
 MONGO_URI = "mongodb://mongo:kYrkkbAQKdReFyOknupBPTRhRuDlDdja@switchback.proxy.rlwy.net:52220"
 DB_NAME = "uploader_bot"
 WHITELIST = ["zonercm", "id_hormoz", "dszone"]
