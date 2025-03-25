@@ -138,7 +138,7 @@ def send_referral_link_request(chat_id, user_id):
     send_request("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": keyboard})
 
 def send_actual_referral_link(chat_id, user_id):
-    referral_link = f"https://ble.ir/uploadd_bot?start={user_id}"
+    referral_link = f"https://ble.ir/McUp_bot?start={user_id}"
     text = f"🔗 لینک اختصاصی شما:\n\n{referral_link}"
     send_request("sendMessage", {"chat_id": chat_id, "text": text})
 
